@@ -64,9 +64,11 @@ function getProductName(booth: BoothLike, productId: string) {
   return matched?.name || productId;
 }
 
+const PRODUCT_LOW_STOCK_THRESHOLD = 2;
+
 function getStockStatus(stock: number) {
   if (stock <= 0) return "Out of stock";
-  if (stock <= 30) return "Low stock";
+  if (stock <= PRODUCT_LOW_STOCK_THRESHOLD) return "Low stock";
   return "Available";
 }
 

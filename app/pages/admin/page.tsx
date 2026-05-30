@@ -1,35 +1,29 @@
-"use client"
+"use client";
 
-import { useRouter } from "next/navigation"
-import { useAuth } from "@/components/providers/auth-context"
-import { useEffect } from "react"
-import { AdminLogin } from "@/components/auth/admin-login-form"
-import CheckAuth from "@/components/common/check-auth"
-import { isAdminRole } from "@/lib/rbac"
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+import { AdminLogin } from "@/components/auth/admin-login-form";
+import { useAuth } from "@/components/providers/auth-context";
+import { isAdminRole } from "@/lib/rbac";
 
 export default function AdminLoginPage() {
-  const router = useRouter()
-  const { user, loading } = useAuth()
+  const router = useRouter();
+  const { user } = useAuth();
 
   useEffect(() => {
-    if (loading) return
-
-    if (!user) return
+    if (!user) return;
 
     if (isAdminRole(user.role)) {
-      router.replace("/pages/admin/dashboard")
-      return
+      router.replace("/pages/admin/dashboard");
+      return;
     }
 
-    router.replace(user._id ? `/pages/users/${user._id}` : "/")
-  }, [user, loading, router])
-
-  if (loading) {
-    return <CheckAuth />
-  }
+    router.replace(user._id ? `/pages/users/${user._id}` : "/");
+  }, [user, router]);
 
   if (user) {
-    return null
+    return null;
   }
 
   return (
@@ -41,5 +35,5 @@ export default function AdminLoginPage() {
         />
       </div>
     </main>
-  )
+  );
 }

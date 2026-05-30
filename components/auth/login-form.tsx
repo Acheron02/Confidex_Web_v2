@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { startAuthentication } from "@simplewebauthn/browser";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PhoneInput } from "../ui/phone-input";
@@ -186,48 +185,6 @@ export function Login({ onSwitchToRegister, onClose }: LoginProps) {
     setOtpExpiresInSeconds(0);
 
     try {
-      const passkeyRes = await fetch("/api/auth/login/passkey/options", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phoneNumber: form.phoneNumber }),
-      });
-
-      const passkeyData = await passkeyRes.json();
-
-      if (passkeyRes.ok) {
-        try {
-          const credential = await startAuthentication({
-            optionsJSON: passkeyData.options,
-          });
-
-          const verifyRes = await fetch("/api/auth/login/passkey/verify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              credential,
-              expectedChallenge: passkeyData.options.challenge,
-              userId: passkeyData.userId,
-            }),
-          });
-
-          const verifyData = await verifyRes.json();
-          setLoading(false);
-
-          if (!verifyRes.ok) {
-            setStatus(verifyData.error || "Passkey login failed");
-            return;
-          }
-
-          login(verifyData.user);
-          clearOtpFlow();
-          onClose();
-          router.push(`/pages/users/${verifyData.user._id}`);
-          return;
-        } catch {
-          // fall through
-        }
-      }
-
       const otpRes = await fetch("/api/auth/login/otp/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -235,7 +192,6 @@ export function Login({ onSwitchToRegister, onClose }: LoginProps) {
       });
 
       const otpData = await otpRes.json();
-      setLoading(false);
 
       if (!otpRes.ok) {
         setStatus(getOtpStartError(otpData, "Login failed"));
@@ -247,9 +203,11 @@ export function Login({ onSwitchToRegister, onClose }: LoginProps) {
       setRetryAfterSeconds(0);
       setOtpExpiresInSeconds(5 * 60);
       setOpen(true);
-    } catch {
+    } catch (error) {
+      console.error("[LOGIN OTP START] error:", error);
+      setStatus("Login failed. Please check your connection and try again.");
+    } finally {
       setLoading(false);
-      setStatus("Login failed");
     }
   };
 

@@ -288,17 +288,30 @@ function getFilenameFromDisposition(disposition: string | null) {
   return "confidex-result-images.zip";
 }
 
-async function downloadSelectedImages(ids: string[]) {
+async function downloadSelectedOriginalImages(ids: string[]) {
   const res = await fetch("/api/admins/result-images/bulk-download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ ids }),
+    body: JSON.stringify({
+      ids,
+
+      // Important:
+      // Force the backend bulk-download route to use the untouched original/raw
+      // capture URLs, not result_image / annotated_image.
+      imageType: "original",
+      image_type: "original",
+      preferImageType: "original",
+      preferOriginal: true,
+      includeAnnotated: false,
+    }),
   });
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data?.error || "Failed to download selected images");
+    throw new Error(
+      data?.error || "Failed to download selected original images",
+    );
   }
 
   const blob = await res.blob();
@@ -518,7 +531,9 @@ export function ResultImagesSection({
     if (!selectedIds.length || bulkBusy) return;
 
     if (selectedIds.length > MAX_BULK_DOWNLOAD) {
-      setBulkError(`Select up to ${MAX_BULK_DOWNLOAD} images per download.`);
+      setBulkError(
+        `Select up to ${MAX_BULK_DOWNLOAD} original images per download.`,
+      );
       return;
     }
 
@@ -526,12 +541,12 @@ export function ResultImagesSection({
       setBulkBusy("download");
       setBulkError(null);
 
-      await downloadSelectedImages(selectedIds);
+      await downloadSelectedOriginalImages(selectedIds);
     } catch (error) {
       setBulkError(
         error instanceof Error
           ? error.message
-          : "Failed to download selected images",
+          : "Failed to download selected original images",
       );
     } finally {
       setBulkBusy(null);
@@ -579,7 +594,8 @@ export function ResultImagesSection({
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Browse uploaded result images by test kit type. Filter by capture or
-            upload date, then select images to download or delete.
+            upload date, then select images to download original captures or
+            delete.
           </p>
         </div>
 
@@ -712,7 +728,7 @@ export function ResultImagesSection({
                   ) : (
                     <Download className="size-4" />
                   )}
-                  Download selected
+                  Download originals
                 </Button>
 
                 <Button

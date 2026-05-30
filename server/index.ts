@@ -5,7 +5,6 @@ dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 
 import { createServer } from "http";
 import next from "next";
-import { parse } from "url";
 import { initWebSocket } from "./webSocket";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -17,8 +16,7 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
-    const parsedUrl = parse(req.url || "", true);
-    void handle(req, res, parsedUrl);
+    void handle(req, res);
   });
 
   initWebSocket(server);

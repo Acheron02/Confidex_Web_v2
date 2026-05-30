@@ -8,23 +8,61 @@ type BoothRouteParams = {
   params: Promise<{ id: string }>;
 };
 
+type BoothLeanDoc = {
+  _id: unknown;
+  name?: string;
+  location?: string;
+  installationDate?: Date | string | null;
+  status?: string;
+  deviceId?: string;
+  deviceSecretHash?: string;
+  isOnline?: boolean;
+  lastSeenAt?: Date | string | null;
+  configVersion?: number;
+  inventoryVersion?: number;
+  config?: {
+    products?: unknown[];
+    [key: string]: unknown;
+  };
+  inventorySnapshot?: {
+    products?: Record<string, unknown>;
+    coins?: Record<
+      string,
+      {
+        stock?: number;
+        enabled?: boolean;
+      }
+    >;
+    [key: string]: unknown;
+  };
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+  [key: string]: unknown;
+};
+
 export async function GET(_req: Request, { params }: BoothRouteParams) {
   try {
     await dbConnect();
+
     const { id } = await params;
 
-    const booth = await Booth.findById(id).lean();
+    const booth = (await Booth.findById(id)
+      .lean()
+      .exec()) as BoothLeanDoc | null;
 
     if (!booth) {
       return NextResponse.json({ error: "Booth not found" }, { status: 404 });
     }
 
     return NextResponse.json(
-      { booth: withBoothPresence(booth) },
+      {
+        booth: withBoothPresence(booth),
+      },
       { status: 200 },
     );
   } catch (error) {
     console.error("Get booth error:", error);
+
     return NextResponse.json(
       { error: "Failed to fetch booth" },
       { status: 500 },
@@ -35,10 +73,11 @@ export async function GET(_req: Request, { params }: BoothRouteParams) {
 async function updateBooth(req: Request, { params }: BoothRouteParams) {
   try {
     await dbConnect();
+
     const { id } = await params;
     const { name, location, installationDate, status } = await req.json();
 
-    const updatedBooth = await Booth.findByIdAndUpdate(
+    const updatedBooth = (await Booth.findByIdAndUpdate(
       id,
       {
         name: String(name).trim(),
@@ -46,8 +85,13 @@ async function updateBooth(req: Request, { params }: BoothRouteParams) {
         installationDate: new Date(installationDate),
         status,
       },
-      { new: true, runValidators: true },
-    ).lean();
+      {
+        new: true,
+        runValidators: true,
+      },
+    )
+      .lean()
+      .exec()) as BoothLeanDoc | null;
 
     if (!updatedBooth) {
       return NextResponse.json({ error: "Booth not found" }, { status: 404 });
@@ -62,6 +106,7 @@ async function updateBooth(req: Request, { params }: BoothRouteParams) {
     );
   } catch (error) {
     console.error("Update booth error:", error);
+
     return NextResponse.json(
       { error: "Failed to update booth" },
       { status: 500 },
@@ -80,9 +125,10 @@ export async function PATCH(req: Request, context: BoothRouteParams) {
 export async function DELETE(_req: Request, { params }: BoothRouteParams) {
   try {
     await dbConnect();
+
     const { id } = await params;
 
-    const deleted = await Booth.findByIdAndDelete(id);
+    const deleted = await Booth.findByIdAndDelete(id).exec();
 
     if (!deleted) {
       return NextResponse.json({ error: "Booth not found" }, { status: 404 });
@@ -94,6 +140,7 @@ export async function DELETE(_req: Request, { params }: BoothRouteParams) {
     );
   } catch (error) {
     console.error("Delete booth error:", error);
+
     return NextResponse.json(
       { error: "Failed to delete booth" },
       { status: 500 },

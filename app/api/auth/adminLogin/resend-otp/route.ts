@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import bcrypt from "bcrypt";
+
 import dbConnect from "@/lib/dbConnect";
 import Admin from "@/models/admin";
 import AdminEmailOtp from "@/models/AdminEmailOtp";
 import { sendAdminOtpEmail } from "@/lib/email";
+import { generateAdminOtp, hashAdminOtp } from "@/lib/admin-email-otp";
 import { getPendingAdminOtpFromNextRequest } from "@/lib/session";
+
+type AdminDoc = {
+  _id: unknown;
+  email: string;
+  name?: string;
+};
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,7 +26,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const admin = await Admin.findById(pending.adminId);
+    const admin = (await Admin.findById(pending.adminId)
+      .select("_id email name")
+      .lean()
+      .exec()) as AdminDoc | null;
+
     if (!admin) {
       return NextResponse.json(
         { error: "Admin account not found" },
@@ -27,21 +38,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpHash = await bcrypt.hash(otp, 10);
+    const otp = generateAdminOtp();
+    const otpHash = hashAdminOtp(otp);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     await AdminEmailOtp.findOneAndUpdate(
       { email: admin.email, consumedAt: null },
       {
-        adminId: admin._id,
-        email: admin.email,
-        otpHash,
-        expiresAt,
-        attempts: 0,
-        consumedAt: null,
+        $set: {
+          adminId: admin._id,
+          email: admin.email,
+          otpHash,
+          expiresAt,
+          attempts: 0,
+          consumedAt: null,
+        },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      },
     );
 
     await sendAdminOtpEmail({
@@ -56,6 +73,7 @@ export async function POST(req: NextRequest) {
     );
   } catch (error) {
     console.error("Admin OTP resend error:", error);
+
     return NextResponse.json(
       { error: "Failed to resend OTP" },
       { status: 500 },

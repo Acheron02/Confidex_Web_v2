@@ -255,7 +255,9 @@ function ActionMenu({
               label={getSubmitReviewLabel(item, isReviewLoading)}
               description="Ask an admin to review this result."
               disabled={reviewDisabled}
-              onClick={() => runAction(() => onSubmitReview(txId))}
+              onClick={() =>
+                runAction(() => onSubmitReview(receiptTransactionId))
+              }
             />
 
             <div className="my-1 border-t border-border" />
@@ -322,9 +324,13 @@ export default function DashboardHistoryTable({
           );
 
           const rowNumber = startIndex + index + 1;
-          const isImageLoading = imageLoadingTxId === txId;
+          const isImageLoading =
+            imageLoadingTxId === receiptTransactionId ||
+            imageLoadingTxId === txId;
           const isReceiptLoading = receiptLoadingTxId === receiptTransactionId;
-          const isReviewLoading = reviewRequestLoadingTxId === txId;
+          const isReviewLoading =
+            reviewRequestLoadingTxId === receiptTransactionId ||
+            reviewRequestLoadingTxId === txId;
           const isActionOpen = openActionId === txId;
           const hasResultImage = canViewResult(item);
 
@@ -414,7 +420,7 @@ export default function DashboardHistoryTable({
                       type="button"
                       variant={hasResultImage ? "outline" : "secondary"}
                       size="sm"
-                      onClick={() => onViewResult(txId)}
+                      onClick={() => onViewResult(receiptTransactionId)}
                       disabled={!hasResultImage || isImageLoading}
                       className="w-full rounded-xl hover:cursor-pointer lg:w-auto lg:min-w-[132px]"
                     >

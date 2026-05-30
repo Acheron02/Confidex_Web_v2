@@ -1,7 +1,7 @@
-"use client";
-
 import Image from "next/image";
 import localFont from "next/font/local";
+
+import HomeReadySignal from "@/components/common/home-ready-signal";
 
 const horizon = localFont({
   src: "../public/fonts/Horizon/gc-horizon-1.otf",
@@ -17,11 +17,11 @@ export default function Home() {
         priority
         sizes="100vw"
         className="
-            object-cover
-            object-[100%_center]
-            sm:object-[100%_center]
-            md:object-center
-          "
+          object-cover
+          object-[100%_center]
+          sm:object-[100%_center]
+          md:object-center
+        "
       />
 
       <div className="relative z-10 flex min-h-[calc(100svh-5rem)] items-center justify-center px-4 py-8 sm:px-6 md:min-h-[calc(100svh-6rem)] md:px-8">
@@ -32,6 +32,8 @@ export default function Home() {
           SCREENING
         </h1>
       </div>
+
+      <HomeReadySignal />
     </section>
   );
 }

@@ -6,6 +6,23 @@ import { getSessionFromRequest } from "@/lib/session";
 import { isAdminRole } from "@/lib/rbac";
 import Result from "@/models/results";
 
+type ResultImageDownloadDoc = {
+  _id: unknown;
+  user_id?: unknown;
+  productID?: string;
+  transaction_id?: string;
+  result_image?: string;
+  annotated_image?: string;
+  testedDate?: Date;
+  createdAt?: Date;
+};
+
+type RouteContext = {
+  params: Promise<{
+    id: string;
+  }>;
+};
+
 function cleanFileSegment(value: unknown, fallback: string) {
   const cleaned = String(value ?? "")
     .trim()
@@ -19,23 +36,26 @@ function cleanFileSegment(value: unknown, fallback: string) {
 
 function getExtension(contentType: string, sourceUrl: string) {
   const loweredContentType = contentType.toLowerCase();
+
   if (loweredContentType.includes("png")) return "png";
   if (loweredContentType.includes("webp")) return "webp";
   if (loweredContentType.includes("gif")) return "gif";
-  if (loweredContentType.includes("jpeg") || loweredContentType.includes("jpg")) return "jpg";
+  if (
+    loweredContentType.includes("jpeg") ||
+    loweredContentType.includes("jpg")
+  ) {
+    return "jpg";
+  }
 
   const path = sourceUrl.split("?")[0] || "";
   const match = path.match(/\.([a-zA-Z0-9]{2,5})$/);
-  if (match?.[1]) return match[1].toLowerCase();
+
+  if (match?.[1]) {
+    return match[1].toLowerCase();
+  }
 
   return "jpg";
 }
-
-type RouteContext = {
-  params: Promise<{
-    id: string;
-  }>;
-};
 
 export async function GET(req: NextRequest, context: RouteContext) {
   try {
@@ -52,19 +72,29 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
     await dbConnect();
 
-    const result = await Result.findById(id)
-      .select("_id user_id productID transaction_id result_image testedDate createdAt")
-      .lean();
+    const result = (await Result.findById(id)
+      .select(
+        "_id user_id productID transaction_id result_image annotated_image testedDate createdAt",
+      )
+      .lean()
+      .exec()) as ResultImageDownloadDoc | null;
 
-    if (!result || !result.result_image) {
+    const rawImageUrl = String(
+      result?.result_image || result?.annotated_image || "",
+    ).trim();
+
+    if (!result || !rawImageUrl) {
       return NextResponse.json({ error: "Image not found" }, { status: 404 });
     }
 
     const origin = new URL(req.url).origin;
-    const rawImageUrl = String(result.result_image).trim();
+
     const imageUrl = rawImageUrl.startsWith("http")
       ? rawImageUrl
-      : new URL(rawImageUrl.startsWith("/") ? rawImageUrl : `/${rawImageUrl}`, origin).toString();
+      : new URL(
+          rawImageUrl.startsWith("/") ? rawImageUrl : `/${rawImageUrl}`,
+          origin,
+        ).toString();
 
     const imageRes = await fetch(imageUrl, { cache: "no-store" });
 
@@ -93,6 +123,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
     });
   } catch (error) {
     console.error("[ADMIN RESULT IMAGE DOWNLOAD][GET] error:", error);
+
     return NextResponse.json(
       { error: "Failed to download image" },
       { status: 500 },

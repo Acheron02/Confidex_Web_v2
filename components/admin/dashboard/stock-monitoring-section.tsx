@@ -34,13 +34,17 @@ interface StockMonitoringSectionProps {
   ) => Promise<void>;
 }
 
+const PRODUCT_LOW_STOCK_THRESHOLD = 2;
+
 function getStockTone(stock: number) {
   if (stock <= 0) {
     return "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300";
   }
-  if (stock <= 30) {
+
+  if (stock <= PRODUCT_LOW_STOCK_THRESHOLD) {
     return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   }
+
   return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
 }
 
