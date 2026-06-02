@@ -31,6 +31,25 @@ function normalizeKey(value: unknown) {
   return clean(value).toLowerCase();
 }
 
+function normalizeForStatus(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, " ");
+}
+
+function isPendingLike(value: unknown) {
+  const normalized = normalizeForStatus(value);
+
+  return (
+    !normalized ||
+    normalized === "pending" ||
+    normalized === "not available" ||
+    normalized === "n/a" ||
+    normalized === "none"
+  );
+}
+
 function getAnnotatedImage(found: any): string {
   return clean(
     found?.result_image ||
@@ -53,8 +72,10 @@ function getOriginalImage(found: any): string {
   );
 }
 
-function hasAnyImage(found: any) {
-  return Boolean(getAnnotatedImage(found) || getOriginalImage(found));
+function getResultTime(value: any) {
+  return new Date(
+    value?.updatedAt || value?.createdAt || value?.testedDate || 0,
+  ).getTime();
 }
 
 function getBestResultForItem(
@@ -80,35 +101,14 @@ function getBestResultForItem(
 
   if (!matches.length) return null;
 
-  const withImage = matches.filter((r) => hasAnyImage(r));
-  const source = withImage.length ? withImage : matches;
-
+  /**
+   * Important:
+   * Do NOT prefer old rows just because they have an image.
+   * A newer pending/no-image row must not inherit or visually reuse an older image.
+   */
   return (
-    source.sort((a, b) => {
-      const aTime = new Date(
-        (a as any)?.updatedAt ||
-          (a as any)?.createdAt ||
-          (a as any)?.testedDate ||
-          0,
-      ).getTime();
-
-      const bTime = new Date(
-        (b as any)?.updatedAt ||
-          (b as any)?.createdAt ||
-          (b as any)?.testedDate ||
-          0,
-      ).getTime();
-
-      return bTime - aTime;
-    })[0] ?? null
+    [...matches].sort((a, b) => getResultTime(b) - getResultTime(a))[0] ?? null
   );
-}
-
-function normalizeForStatus(value: unknown) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_-]+/g, " ");
 }
 
 export function getDisplayStatus(
@@ -135,22 +135,18 @@ export function getDisplayStatus(
     return "Under Review";
   }
 
-  if (
-    !normalizedResult ||
-    normalizedResult === "pending" ||
-    normalizedResult === "not available" ||
-    normalizedResult === "n/a" ||
-    normalizedResult === "none" ||
-    normalizedTransactionStatus === "pending"
-  ) {
+  if (isPendingLike(result) || normalizedTransactionStatus === "pending") {
     return "Pending";
   }
 
   return "Completed";
 }
 
-function extractResultText(found: Result | null): string {
-  if (!found) return "Pending";
+function extractResultText(found: Result | null, fallback?: unknown): string {
+  if (!found) {
+    return clean(fallback) || "Pending";
+  }
+
   return getEffectiveResult(found);
 }
 
@@ -179,9 +175,27 @@ export function buildDisplayItems(
         item.productID,
       );
 
-      const resultText = extractResultText(foundResult);
+      const resultText = extractResultText(foundResult, (item as any).result);
+
+      const status = getDisplayStatus(
+        resultText,
+        transactionStatus,
+        foundResult?.review_status,
+      );
+
       const annotatedImage = getAnnotatedImage(foundResult);
       const originalImage = getOriginalImage(foundResult);
+
+      /**
+       * Critical fix:
+       * Pending transactions must not expose any image URL.
+       * This prevents the UI from showing a previous/stale result image.
+       */
+      const shouldExposeImage = status !== "Pending";
+      const displayImage = shouldExposeImage
+        ? annotatedImage || originalImage
+        : "";
+      const displayOriginalImage = shouldExposeImage ? originalImage : "";
 
       return {
         ...item,
@@ -195,14 +209,10 @@ export function buildDisplayItems(
         originalResult: foundResult?.original_result || foundResult?.result,
         overrideResult: foundResult?.override_result || "",
         reviewStatus: foundResult?.review_status || "none",
-        result_image_url: annotatedImage || originalImage,
-        original_image_url: originalImage,
+        result_image_url: displayImage,
+        original_image_url: displayOriginalImage,
         resultUpdatedAt: extractResultUpdatedAt(foundResult),
-        status: getDisplayStatus(
-          resultText,
-          transactionStatus,
-          foundResult?.review_status,
-        ),
+        status,
       };
     });
   });

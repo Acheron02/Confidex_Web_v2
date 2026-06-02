@@ -1,0 +1,18 @@
+[
+  {
+    "_id": "69f8ec4b59612fa7fd531bc4",
+    "userId": "69b4259c191db5be838a8d9f",
+    "type": "coupon_request_approved",
+    "title": "Coupon request approved",
+    "message": "Your 10% discount coupon is now available in your receipt.",
+    "href": "/pages/users/69b4259c191db5be838a8d9f",
+    "readAt": "2026-05-04T18:58:38.169Z",
+    "data": {
+      "transactionId": "69f5a952970d8f1d3c0a5672",
+      "couponToken": "DISCOUNT-A26142D978B2D35FDBA241B7"
+    },
+    "createdAt": "2026-05-04T18:58:19.529Z",
+    "updatedAt": "2026-05-04T18:58:38.170Z",
+    "__v": 0
+  }
+]

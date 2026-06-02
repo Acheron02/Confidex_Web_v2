@@ -51,8 +51,38 @@ function getOriginalImageUrl(result?: Partial<Result> | null) {
   return annotated;
 }
 
+function normalizePendingValue(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, " ");
+}
+
+function isPendingResult(result?: Partial<Result> | null) {
+  const effective = getEffectiveResult(result);
+  const normalized = normalizePendingValue(effective);
+
+  return (
+    !normalized ||
+    normalized === "pending" ||
+    normalized === "not available" ||
+    normalized === "n/a" ||
+    normalized === "none"
+  );
+}
+
 function hasAnyResultImage(result?: Partial<Result> | null) {
+  if (isPendingResult(result)) {
+    return false;
+  }
+
   return Boolean(getAnnotatedImageUrl(result) || getOriginalImageUrl(result));
+}
+
+function getResultTime(value: any) {
+  return new Date(
+    value?.updatedAt || value?.createdAt || value?.testedDate || 0,
+  ).getTime();
 }
 
 function getBestResultMatch(results: Result[], userId: string, txId: string) {
@@ -64,21 +94,12 @@ function getBestResultMatch(results: Result[], userId: string, txId: string) {
 
   if (!matches.length) return null;
 
-  const withImage = matches.filter((r) => hasAnyResultImage(r));
-  const source = withImage.length ? withImage : matches;
-
+  /**
+   * Do not prefer older rows just because they have images.
+   * Use latest result state. If it is Pending, image display is blocked.
+   */
   return (
-    source.sort((a, b) => {
-      const aTime = new Date(
-        (a as any)?.updatedAt || (a as any)?.createdAt || 0,
-      ).getTime();
-
-      const bTime = new Date(
-        (b as any)?.updatedAt || (b as any)?.createdAt || 0,
-      ).getTime();
-
-      return bTime - aTime;
-    })[0] ?? null
+    [...matches].sort((a, b) => getResultTime(b) - getResultTime(a))[0] ?? null
   );
 }
 
@@ -380,77 +401,86 @@ export function useDashboardData(userId?: string) {
     [userId],
   );
 
-  const fetchAndOpenImage = useCallback(
-    async (txId: string) => {
-      if (!userId) return;
+    const fetchAndOpenImage = useCallback(
+      async (txId: string) => {
+        if (!userId) return;
 
-      setImageLoadingTxId(txId);
+        setImageLoadingTxId(txId);
 
-      try {
-        let found = getBestResultMatch(results, userId, txId);
-
-        if (!found) {
-          const refreshed = await fetchUserResults(userId);
-          setResults(refreshed || []);
-          found = getBestResultMatch(refreshed || [], userId, txId);
-        }
-
-        const annotatedImg = getAnnotatedImageUrl(found);
-        const originalImg = getOriginalImageUrl(found);
-
-        const resultText = extractResultText(found);
-
-        const versionToken =
-          (found as any)?.updatedAt ||
-          (found as any)?.createdAt ||
-          (found as any)?.testedDate ||
-          found?._id ||
-          null;
-
-        if (!annotatedImg && !originalImg) {
-          toast.error("No result image found", {
-            description:
-              "This transaction does not have an uploaded result image yet.",
-          });
-          return;
-        }
-
-        const displayUrl = resolveImageUrl(
-          String(annotatedImg || originalImg),
-          versionToken,
-        );
-
-        const originalUrl = resolveImageUrl(
-          String(originalImg || annotatedImg),
-          versionToken,
-        );
-
+        // Clear the previous dialog image immediately so a pending/no-image row
+        // can never keep showing the previously opened image.
+        setIsImageDialogOpen(false);
         setSelectedImageUrl(null);
         setSelectedOriginalImageUrl(null);
         setSelectedImageResult(null);
-        setIsImageDialogOpen(false);
 
-        requestAnimationFrame(() => {
-          setSelectedImageUrl(displayUrl);
-          setSelectedOriginalImageUrl(originalUrl || displayUrl);
-          setSelectedImageResult(resultText);
+        try {
+          let found = getBestResultMatch(results, userId, txId);
+
+          if (!found) {
+            const refreshed = await fetchUserResults(userId);
+            setResults(refreshed || []);
+            found = getBestResultMatch(refreshed || [], userId, txId);
+          }
+
+          if (!found || isPendingResult(found)) {
+            toast.info("No image yet", {
+              description:
+                "This transaction is still pending and does not have an uploaded result image yet.",
+            });
+            return;
+          }
+
+          const annotatedImg = getAnnotatedImageUrl(found);
+          const originalImg = getOriginalImageUrl(found);
+          const resultText = extractResultText(found);
+
+          const versionToken =
+            (found as any)?.updatedAt ||
+            (found as any)?.createdAt ||
+            (found as any)?.testedDate ||
+            found?._id ||
+            null;
+
+          if (!annotatedImg && !originalImg) {
+            toast.info("No image yet", {
+              description:
+                "This transaction does not have an uploaded result image yet.",
+            });
+            return;
+          }
+
+          const displayUrl = resolveImageUrl(
+            String(annotatedImg || originalImg),
+            versionToken,
+          );
+
+          const originalUrl = resolveImageUrl(
+            String(originalImg || annotatedImg),
+            versionToken,
+          );
 
           requestAnimationFrame(() => {
-            setIsImageDialogOpen(true);
-          });
-        });
-      } catch (err) {
-        console.error("Failed to fetch image:", err);
+            setSelectedImageUrl(displayUrl);
+            setSelectedOriginalImageUrl(originalUrl || displayUrl);
+            setSelectedImageResult(resultText);
 
-        toast.error("Failed to open result image", {
-          description: "Please try again or refresh the dashboard.",
-        });
-      } finally {
-        setImageLoadingTxId(null);
-      }
-    },
-    [userId, results],
-  );
+            requestAnimationFrame(() => {
+              setIsImageDialogOpen(true);
+            });
+          });
+        } catch (err) {
+          console.error("Failed to fetch image:", err);
+
+          toast.error("Failed to open result image", {
+            description: "Please try again or refresh the dashboard.",
+          });
+        } finally {
+          setImageLoadingTxId(null);
+        }
+      },
+      [userId, results],
+    );
 
   const requestResultReview = useCallback(
     async (txId: string) => {

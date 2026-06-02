@@ -1,51 +1,124 @@
-// app/api/qr-tokens/route.ts
-import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/dbConnect";
 import QrToken from "@/models/qrToken";
+import User from "@/models/User";
+import { NextResponse } from "next/server";
+import { broadcast } from "@/server/webSocket";
+import { verifyOfflineLoginToken } from "@/lib/offline-login-token";
 
-export async function POST(req: NextRequest) {
+type UserType = {
+  _id: string | { toString(): string };
+  username: string;
+  phoneNumber: string;
+  gender: "male" | "female" | "other";
+  dob: Date;
+  createdAt: Date;
+};
+
+function serializeUser(user: UserType) {
+  return {
+    _id: user._id.toString(),
+    username: user.username,
+    gender: user.gender,
+    dob: user.dob,
+    phoneNumber: user.phoneNumber,
+    createdAt: user.createdAt,
+  };
+}
+
+export async function POST(req: Request) {
   try {
     await dbConnect();
+
     const body = await req.json();
-    const { userId, token } = body;
 
-    if (!userId) {
+    if (!body.qrCode) {
       return NextResponse.json(
-        { success: false, error: "userId required" },
+        { error: "qrCode is required" },
         { status: 400 },
       );
     }
 
-    if (!token || !String(token).trim()) {
+    const qrCode = String(body.qrCode).trim();
+
+    if (!qrCode.startsWith("LOGIN-")) {
       return NextResponse.json(
-        { success: false, error: "token required" },
-        { status: 400 },
+        { error: "Invalid QR code type" },
+        { status: 401 },
       );
     }
 
-    const normalizedToken = String(token).trim();
+    let signedUserId = "";
 
-    const existing = await QrToken.findOne({ token: normalizedToken });
-    if (existing) {
-      return NextResponse.json(
-        { success: false, error: "Token already exists" },
-        { status: 409 },
-      );
+    if (qrCode.startsWith("LOGIN-OFFLINE-v1.")) {
+      const signed = verifyOfflineLoginToken(qrCode);
+
+      if (!signed.ok || !signed.payload?.sub) {
+        return NextResponse.json(
+          {
+            error: "Invalid signed login QR code",
+            reason: signed.error,
+          },
+          { status: 401 },
+        );
+      }
+
+      signedUserId = signed.payload.sub;
     }
 
-    const newToken = await QrToken.create({
-      userId,
-      token: normalizedToken,
-      type: "discount",
-      expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
+    const qrRecord = await QrToken.findOne({
+      token: qrCode,
+      type: "login",
       used: false,
+      expiresAt: { $gt: new Date() },
     });
 
-    return NextResponse.json({ success: true, qrToken: newToken });
-  } catch (error) {
-    console.error("[QR TOKENS] create discount token error:", error);
+    if (!qrRecord) {
+      return NextResponse.json(
+        { error: "QR code expired, already used, or invalid" },
+        { status: 401 },
+      );
+    }
+
+    if (signedUserId && String(qrRecord.userId) !== signedUserId) {
+      return NextResponse.json(
+        { error: "QR code user mismatch" },
+        { status: 401 },
+      );
+    }
+
+    const user = (await User.findById(
+      qrRecord.userId,
+    ).lean()) as UserType | null;
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    qrRecord.used = true;
+    await qrRecord.save();
+
+    broadcast({
+      type: "qr_scanned",
+      userId: qrRecord.userId.toString(),
+      token: qrRecord.token,
+    });
+
     return NextResponse.json(
-      { success: false, error: "Failed to store token" },
+      {
+        message: "QR scanned successfully",
+        user: serializeUser(user),
+        offlineCapable: qrCode.startsWith("LOGIN-OFFLINE-v1."),
+      },
+      { status: 200 },
+    );
+  } catch (err: any) {
+    console.error("[QR VERIFY] error:", err);
+
+    return NextResponse.json(
+      {
+        error: "Server error",
+        details: err?.message || String(err),
+      },
       { status: 500 },
     );
   }
