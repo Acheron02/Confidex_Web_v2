@@ -1,125 +1,162 @@
+import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/dbConnect";
 import QrToken from "@/models/qrToken";
 import User from "@/models/User";
-import { NextResponse } from "next/server";
-import { broadcast } from "@/server/webSocket";
-import { verifyOfflineLoginToken } from "@/lib/offline-login-token";
 
-type UserType = {
-  _id: string | { toString(): string };
-  username: string;
-  phoneNumber: string;
-  gender: "male" | "female" | "other";
-  dob: Date;
-  createdAt: Date;
-};
-
-function serializeUser(user: UserType) {
-  return {
-    _id: user._id.toString(),
-    username: user.username,
-    gender: user.gender,
-    dob: user.dob,
-    phoneNumber: user.phoneNumber,
-    createdAt: user.createdAt,
-  };
+function cleanString(value: unknown): string {
+  return String(value ?? "").trim();
 }
 
-export async function POST(req: Request) {
+function cleanNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function parseExpiresAt(value: unknown): Date {
+  const raw = cleanString(value);
+
+  if (raw) {
+    const parsed = new Date(raw);
+
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  }
+
+  const fallback = new Date();
+  fallback.setMonth(fallback.getMonth() + 3);
+  return fallback;
+}
+
+export async function POST(req: NextRequest) {
   try {
     await dbConnect();
 
     const body = await req.json();
 
-    if (!body.qrCode) {
+    const userId = cleanString(body?.userId || body?.user_id);
+
+    const qrCode = cleanString(
+      body?.qrCode ||
+        body?.qr_code ||
+        body?.token ||
+        body?.qrValue ||
+        body?.qr_value,
+    );
+
+    const discountPercent = cleanNumber(
+      body?.discountPercent ?? body?.discount_percent,
+      10,
+    );
+
+    const source =
+      cleanString(body?.source || body?.reason) || "booth_printed_coupon";
+
+    const receiptTransactionId = cleanString(
+      body?.receiptTransactionId ||
+        body?.receipt_transaction_id ||
+        body?.transactionId ||
+        body?.transaction_id,
+    );
+
+    const expiresAt = parseExpiresAt(body?.expiresAt || body?.expires_at);
+
+    if (!userId) {
       return NextResponse.json(
-        { error: "qrCode is required" },
+        {
+          success: false,
+          error: "Missing userId",
+        },
         { status: 400 },
       );
     }
 
-    const qrCode = String(body.qrCode).trim();
-
-    if (!qrCode.startsWith("LOGIN-")) {
+    if (!qrCode) {
       return NextResponse.json(
-        { error: "Invalid QR code type" },
-        { status: 401 },
+        {
+          success: false,
+          error: "qrCode is required",
+        },
+        { status: 400 },
       );
     }
 
-    let signedUserId = "";
-
-    if (qrCode.startsWith("LOGIN-OFFLINE-v1.")) {
-      const signed = verifyOfflineLoginToken(qrCode);
-
-      if (!signed.ok || !signed.payload?.sub) {
-        return NextResponse.json(
-          {
-            error: "Invalid signed login QR code",
-            reason: signed.error,
-          },
-          { status: 401 },
-        );
-      }
-
-      signedUserId = signed.payload.sub;
-    }
-
-    const qrRecord = await QrToken.findOne({
-      token: qrCode,
-      type: "login",
-      used: false,
-      expiresAt: { $gt: new Date() },
-    });
-
-    if (!qrRecord) {
-      return NextResponse.json(
-        { error: "QR code expired, already used, or invalid" },
-        { status: 401 },
-      );
-    }
-
-    if (signedUserId && String(qrRecord.userId) !== signedUserId) {
-      return NextResponse.json(
-        { error: "QR code user mismatch" },
-        { status: 401 },
-      );
-    }
-
-    const user = (await User.findById(
-      qrRecord.userId,
-    ).lean()) as UserType | null;
+    const user = await User.findById(userId).lean();
 
     if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "User not found",
+        },
+        { status: 404 },
+      );
     }
 
-    qrRecord.used = true;
-    await qrRecord.save();
-
-    broadcast({
-      type: "qr_scanned",
-      userId: qrRecord.userId.toString(),
-      token: qrRecord.token,
-    });
+    const qrToken = await QrToken.findOneAndUpdate(
+      {
+        token: qrCode,
+        type: "discount",
+      },
+      {
+        $set: {
+          token: qrCode,
+          userId,
+          type: "discount",
+          used: false,
+          discountPercent,
+          source,
+          receiptTransactionId: receiptTransactionId || null,
+          expiresAt,
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      },
+    );
 
     return NextResponse.json(
       {
-        message: "QR scanned successfully",
-        user: serializeUser(user),
-        offlineCapable: qrCode.startsWith("LOGIN-OFFLINE-v1."),
+        success: true,
+        ok: true,
+        message: "Discount QR token stored successfully.",
+        token: qrToken.token,
+        qrCode: qrToken.token,
+        userId: String(qrToken.userId),
+        type: qrToken.type,
+        used: Boolean(qrToken.used),
+        discountPercent: Number(
+          qrToken.discountPercent || discountPercent || 0,
+        ),
+        receiptTransactionId: qrToken.receiptTransactionId || null,
+        expiresAt: qrToken.expiresAt
+          ? new Date(qrToken.expiresAt).toISOString()
+          : expiresAt.toISOString(),
       },
       { status: 200 },
     );
-  } catch (err: any) {
-    console.error("[QR VERIFY] error:", err);
+  } catch (error: any) {
+    console.error("[QR TOKENS CREATE] error:", error);
 
     return NextResponse.json(
       {
-        error: "Server error",
-        details: err?.message || String(err),
+        success: false,
+        error: "Failed to store QR token",
+        details: error?.message || String(error),
       },
       { status: 500 },
     );
   }
+}
+
+export async function GET() {
+  return NextResponse.json(
+    {
+      success: false,
+      error: "GET method not allowed",
+    },
+    { status: 405 },
+  );
 }

@@ -3,6 +3,10 @@ import type { Server as HttpServer } from "http";
 import dbConnect from "@/lib/dbConnect";
 import Booth from "@/models/Booth";
 import { authenticateBoothSocket } from "@/lib/deviceAuth";
+import {
+  normalizeInventorySnapshot,
+  sendInventoryStockAlertEmail,
+} from "@/lib/inventory-mail";
 
 type BoothSocket = WebSocket & {
   boothId?: string;
@@ -245,16 +249,46 @@ export function initWebSocket(server: HttpServer) {
             return;
           }
 
-          booth.inventorySnapshot = msg.inventorySnapshot || {
-            products: {},
-            coins: {},
-          };
+          const previousInventory = normalizeInventorySnapshot(
+            booth.inventorySnapshot || {
+              products: {},
+              coins: {},
+            },
+          );
 
+          const nextInventory = normalizeInventorySnapshot(
+            msg.inventorySnapshot || {
+              products: {},
+              coins: {},
+            },
+          );
+
+          booth.inventorySnapshot = nextInventory;
           booth.inventoryVersion = (booth.inventoryVersion || 1) + 1;
           booth.lastSeenAt = new Date();
           booth.isOnline = true;
 
           await booth.save();
+
+          try {
+            const alertResult = await sendInventoryStockAlertEmail({
+              booth,
+              previousInventory,
+              nextInventory,
+              source: "Booth WebSocket inventory update",
+            });
+
+            if (alertResult?.sent) {
+              console.log(
+                `[INVENTORY EMAIL] Stock alert sent from WebSocket inventory update for booth=${booth.deviceId || booth._id}`,
+              );
+            }
+          } catch (emailError) {
+            console.error(
+              "[INVENTORY EMAIL] Failed to send WebSocket inventory stock alert:",
+              emailError,
+            );
+          }
 
           ws.lastPresenceWriteAt = Date.now();
 
