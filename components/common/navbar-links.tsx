@@ -7,6 +7,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 const LINKS = [
   { href: "/", label: "Home" },
   { href: "/pages/about", label: "About" },
+  { href: "/pages/consultation", label: "Consultation" },
   { href: "/pages/contact", label: "Contact" },
 ];
 
