@@ -350,6 +350,25 @@ export function ResultImagesSection({
   const [copiedTransactionId, setCopiedTransactionId] = React.useState<
     string | null
   >(null);
+  const [failedImageIds, setFailedImageIds] = React.useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const canShowImage = React.useCallback(
+    (image: ResultImageRecord | null) =>
+      Boolean(
+        image?.result_image &&
+        image?._id &&
+        !failedImageIds.has(String(image._id)),
+      ),
+    [failedImageIds],
+  );
+
+  const markImageFailed = React.useCallback((id?: string) => {
+    const cleanId = String(id || "").trim();
+    if (!cleanId) return;
+    setFailedImageIds((current) => new Set(current).add(cleanId));
+  }, []);
 
   const selectedIdSet = React.useMemo(
     () => new Set(selectedIds),
@@ -464,13 +483,31 @@ export function ResultImagesSection({
   React.useEffect(() => {
     if (!previewImage) return;
 
-    setPreviewLoading(true);
-  }, [previewImage]);
+    const latest = images.find((image) => image._id === previewImage._id);
+    if (!latest) {
+      setPreviewImage(null);
+      return;
+    }
+
+    if (latest !== previewImage) {
+      setPreviewImage(latest);
+      return;
+    }
+
+    setPreviewLoading(canShowImage(latest));
+  }, [previewImage, images, canShowImage]);
 
   React.useEffect(() => {
     const existingIds = new Set(images.map((image) => image._id));
 
     setSelectedIds((current) => current.filter((id) => existingIds.has(id)));
+    setFailedImageIds((current) => {
+      const next = new Set<string>();
+      current.forEach((id) => {
+        if (existingIds.has(id)) next.add(id);
+      });
+      return next;
+    });
   }, [images]);
 
   React.useEffect(() => {
@@ -817,16 +854,21 @@ export function ResultImagesSection({
                           <div className="relative shrink-0">
                             <button
                               type="button"
-                              onClick={() => setPreviewImage(image)}
+                              onClick={() => {
+                                setPreviewLoading(canShowImage(image));
+                                setPreviewImage(image);
+                              }}
                               className="relative aspect-[4/3] w-full overflow-hidden bg-muted text-left"
                               aria-label={`Open ${image.kitType} image`}
                             >
-                              {image.result_image ? (
+                              {canShowImage(image) ? (
                                 <img
+                                  key={`${image._id}:${image.result_image}`}
                                   src={image.result_image}
                                   alt={`${image.kitType} result image`}
                                   className="h-full w-full object-cover transition group-hover:scale-105"
                                   loading="lazy"
+                                  onError={() => markImageFailed(image._id)}
                                 />
                               ) : (
                                 <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
@@ -992,16 +1034,22 @@ export function ResultImagesSection({
                 </div>
               ) : null}
 
-              {previewImage.result_image ? (
+              {canShowImage(previewImage) ? (
                 <img
+                  key={`${previewImage._id}:${previewImage.result_image}`}
                   src={previewImage.result_image}
                   alt={`${previewImage.kitType} result preview`}
                   className="max-h-[72vh] w-auto max-w-full rounded-xl object-contain shadow-2xl"
                   onLoad={() => setPreviewLoading(false)}
-                  onError={() => setPreviewLoading(false)}
+                  onError={() => {
+                    markImageFailed(previewImage._id);
+                    setPreviewLoading(false);
+                  }}
                 />
               ) : (
-                <div className="text-sm text-white/70">No image available</div>
+                <div className="text-sm text-white/70">
+                  No image uploaded yet
+                </div>
               )}
             </div>
           </div>

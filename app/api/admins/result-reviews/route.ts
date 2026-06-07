@@ -31,6 +31,19 @@ function normalizeResultImageUrl(value: unknown) {
 
   if (!raw) return "";
 
+  const lowered = raw.toLowerCase();
+  if (
+    lowered === "pending" ||
+    lowered === "placeholder" ||
+    lowered === "no image" ||
+    lowered === "none" ||
+    lowered === "null" ||
+    lowered === "undefined" ||
+    lowered === "about:blank"
+  ) {
+    return "";
+  }
+
   if (raw.startsWith("http://") || raw.startsWith("https://")) {
     return raw;
   }
@@ -54,6 +67,52 @@ function normalizeResultImageUrl(value: unknown) {
   }
 
   return `/api/images/by-key?key=${encodeURIComponent(raw)}`;
+}
+
+function sanitizeForPath(value: unknown) {
+  return cleanString(value)
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function safeDecodeUri(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function imageBelongsToTransaction(imageUrl: string, transactionId: string) {
+  const cleanUrl = cleanString(imageUrl);
+  const cleanTransactionId = cleanString(transactionId);
+
+  if (!cleanUrl) return false;
+  if (!cleanTransactionId) return true;
+
+  const decodedUrl = safeDecodeUri(cleanUrl);
+  const sanitizedTransactionId = sanitizeForPath(cleanTransactionId);
+
+  if (
+    decodedUrl.includes(cleanTransactionId) ||
+    (!!sanitizedTransactionId && decodedUrl.includes(sanitizedTransactionId))
+  ) {
+    return true;
+  }
+
+  if (/capture_sessions\//i.test(decodedUrl)) {
+    return false;
+  }
+
+  return true;
+}
+
+function getSafeResultImageUrl(value: unknown, transactionId: string) {
+  const normalized = normalizeResultImageUrl(value);
+  if (!normalized) return "";
+
+  return imageBelongsToTransaction(normalized, transactionId) ? normalized : "";
 }
 
 function getUserId(item: any) {
@@ -80,7 +139,10 @@ function serializePendingReviewResult(item: any) {
     override_result: cleanString(item.override_result),
     review_status: cleanString(item.review_status || "none"),
     review_notes: cleanString(item.review_notes),
-    result_image: normalizeResultImageUrl(item.result_image),
+    result_image: getSafeResultImageUrl(
+      item.result_image,
+      cleanString(item.transaction_id),
+    ),
     testedDate: item.testedDate,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -109,7 +171,10 @@ function serializeHistoryResult(item: any, adminLookup: Map<string, any>) {
     override_result: overrideResult,
     review_status: cleanString(item.review_status || "overridden"),
     review_notes: cleanString(item.review_notes),
-    result_image: normalizeResultImageUrl(item.result_image),
+    result_image: getSafeResultImageUrl(
+      item.result_image,
+      cleanString(item.transaction_id),
+    ),
     testedDate: item.testedDate,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -122,7 +187,6 @@ function serializeHistoryResult(item: any, adminLookup: Map<string, any>) {
 
 async function getPendingReviews() {
   const results = await Result.find({
-    result_image: { $exists: true, $ne: "" },
     $or: [
       {
         review_status: "under_review",

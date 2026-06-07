@@ -79,11 +79,111 @@ function cleanString(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function normalizeResultImageUrl(value: unknown) {
+  const raw = cleanString(value);
+
+  if (!raw) return "";
+
+  const lowered = raw.toLowerCase();
+  if (
+    lowered === "pending" ||
+    lowered === "placeholder" ||
+    lowered === "no image" ||
+    lowered === "none" ||
+    lowered === "null" ||
+    lowered === "undefined" ||
+    lowered === "about:blank"
+  ) {
+    return "";
+  }
+
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    return raw;
+  }
+
+  if (raw.startsWith("/api/images/")) {
+    return raw;
+  }
+
+  if (raw.startsWith("/uploads/")) {
+    const key = raw.replace(/^\/uploads\//, "");
+    return `/api/images/by-key?key=${encodeURIComponent(key)}`;
+  }
+
+  if (raw.startsWith("uploads/")) {
+    const key = raw.replace(/^uploads\//, "");
+    return `/api/images/by-key?key=${encodeURIComponent(key)}`;
+  }
+
+  if (raw.startsWith("/")) {
+    return raw;
+  }
+
+  return `/api/images/by-key?key=${encodeURIComponent(raw)}`;
+}
+
+function sanitizeForPath(value: unknown) {
+  return cleanString(value)
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function safeDecodeUri(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function imageBelongsToTransaction(imageUrl: string, transactionId: string) {
+  const cleanUrl = cleanString(imageUrl);
+  const cleanTransactionId = cleanString(transactionId);
+
+  if (!cleanUrl) return false;
+  if (!cleanTransactionId) return true;
+
+  const decodedUrl = safeDecodeUri(cleanUrl);
+  const sanitizedTransactionId = sanitizeForPath(cleanTransactionId);
+
+  if (
+    decodedUrl.includes(cleanTransactionId) ||
+    (!!sanitizedTransactionId && decodedUrl.includes(sanitizedTransactionId))
+  ) {
+    return true;
+  }
+
+  // New booth image uploads are stored under:
+  // capture_sessions/<user>/<transaction>/<product>/<type>.png
+  // If a capture_sessions URL does not contain the current transaction ID, it
+  // is almost certainly a stale image from a previous transaction and must be
+  // hidden so the admin page shows the placeholder instead.
+  if (/capture_sessions\//i.test(decodedUrl)) {
+    return false;
+  }
+
+  // Keep legacy non-capture URLs visible because old rows may not have the
+  // transaction ID embedded in the file path.
+  return true;
+}
+
+function getSafeResultImageUrl(value: unknown, transactionId: string) {
+  const normalized = normalizeResultImageUrl(value);
+  if (!normalized) return "";
+
+  return imageBelongsToTransaction(normalized, transactionId) ? normalized : "";
+}
+
 function serializeResultImage(item: any, receiptLookup: Map<string, any>) {
   const user =
     item.user_id && typeof item.user_id === "object" ? item.user_id : null;
   const userId = user?._id ? String(user._id) : cleanString(item.user_id);
   const transactionId = cleanString(item.transaction_id);
+  const safeResultImage = getSafeResultImageUrl(
+    item.result_image,
+    transactionId,
+  );
   const receiptDoc = receiptLookup.get(`${userId}:${transactionId}`);
   const receipt = receiptDoc?.receipt || {};
   const receiptProduct = receipt?.product || {};
@@ -111,7 +211,7 @@ function serializeResultImage(item: any, receiptLookup: Map<string, any>) {
     original_result: originalResult,
     override_result: cleanString(item.override_result),
     review_status: cleanString(item.review_status || "none"),
-    result_image: cleanString(item.result_image),
+    result_image: safeResultImage,
     testedDate: item.testedDate,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -130,7 +230,12 @@ export async function GET(req: NextRequest) {
     await dbConnect();
 
     const results = await Result.find({
-      result_image: { $exists: true, $ne: "" },
+      $or: [
+        { result_image: { $exists: true, $nin: ["", null] } },
+        { review_status: "under_review" },
+        { result: { $regex: /^pending$/i } },
+        { original_result: { $regex: /^pending$/i } },
+      ],
     })
       .populate("user_id", "username")
       .select(

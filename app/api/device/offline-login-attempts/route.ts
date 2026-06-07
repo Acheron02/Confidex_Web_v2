@@ -19,6 +19,52 @@ function parseScanTime(value: unknown) {
   return new Date();
 }
 
+function payloadFromAttempt(attempt: any) {
+  const payload = attempt?.payload;
+
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return payload as Record<string, any>;
+  }
+
+  const payloadJson = clean(attempt?.payload_json || attempt?.payloadJson);
+
+  if (!payloadJson) return {} as Record<string, any>;
+
+  try {
+    const parsed = JSON.parse(payloadJson);
+
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, any>;
+    }
+  } catch {
+    // ignore invalid optional payload JSON
+  }
+
+  return {} as Record<string, any>;
+}
+
+function extractUserId(payload: Record<string, any>) {
+  return clean(
+    payload.sub ||
+      payload.user_id ||
+      payload.userId ||
+      payload.userID ||
+      payload._id ||
+      payload.id ||
+      payload.uid,
+  );
+}
+
+function extractTokenId(payload: Record<string, any>) {
+  return clean(
+    payload.jti ||
+      payload.token_id ||
+      payload.tokenId ||
+      payload.nonce ||
+      "",
+  );
+}
+
 export async function POST(req: Request) {
   try {
     const booth = await authenticateBoothDevice(req);
@@ -31,38 +77,58 @@ export async function POST(req: Request) {
     const results = [];
 
     for (const attempt of attempts) {
-      const localAttemptId = clean(attempt?.local_attempt_id || attempt?.id);
+      const localAttemptId = clean(
+        attempt?.local_attempt_id || attempt?.attempt_id || attempt?.id,
+      );
+
       const qrCode = clean(attempt?.qr_code || attempt?.qrCode);
+      const qrHash = clean(attempt?.qr_hash || attempt?.qrHash);
       const claimedUserId = clean(attempt?.user_id || attempt?.userId);
       const scannedAt = parseScanTime(
-        attempt?.scanned_at || attempt?.scannedAt,
+        attempt?.scanned_at || attempt?.scannedAt || attempt?.used_at || attempt?.usedAt,
       );
       const scannedAtSeconds = Math.floor(scannedAt.getTime() / 1000);
+      const payload = payloadFromAttempt(attempt);
 
-      if (!localAttemptId || !qrCode) {
+      let userId = extractUserId(payload);
+      let tokenId = clean(attempt?.token_id || attempt?.tokenId) || extractTokenId(payload);
+
+      if (!localAttemptId) {
         results.push({
           local_attempt_id: localAttemptId,
           ok: false,
-          status: "missing_required_fields",
+          status: "missing_local_attempt_id",
         });
         continue;
       }
 
-      const signed = verifyOfflineLoginToken(qrCode, {
-        nowSeconds: scannedAtSeconds,
-      });
+      if (qrCode) {
+        const signed = verifyOfflineLoginToken(qrCode, {
+          nowSeconds: scannedAtSeconds,
+        });
 
-      if (!signed.ok || !signed.payload?.sub) {
+        if (!signed.ok || !signed.payload?.sub) {
+          results.push({
+            local_attempt_id: localAttemptId,
+            ok: false,
+            status: "invalid_signature_or_expired_at_scan_time",
+            reason: signed.error,
+          });
+          continue;
+        }
+
+        userId = signed.payload.sub;
+        tokenId = signed.payload.jti || tokenId;
+      }
+
+      if (!userId) {
         results.push({
           local_attempt_id: localAttemptId,
           ok: false,
-          status: "invalid_signature_or_expired_at_scan_time",
-          reason: signed.error,
+          status: "missing_user_id",
         });
         continue;
       }
-
-      const userId = signed.payload.sub;
 
       if (claimedUserId && claimedUserId !== userId) {
         results.push({
@@ -86,32 +152,91 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const qrRecord = await QrToken.findOne({
-        token: qrCode,
+      const lookup: any = {
         type: "login",
-      });
+      };
 
-      if (qrRecord) {
-        if (!qrRecord.used) {
-          qrRecord.used = true;
-          await qrRecord.save();
-        }
-
+      if (tokenId) {
+        lookup.tokenId = tokenId;
+      } else if (qrCode) {
+        lookup.token = qrCode;
+      } else {
         results.push({
           local_attempt_id: localAttemptId,
-          ok: true,
-          status: "verified_and_marked_used",
+          ok: false,
+          status: "missing_token_id_or_qr_code",
           user_id: userId,
+          qr_hash: qrHash || undefined,
         });
+        continue;
+      }
 
+      const qrRecord = await QrToken.findOne(lookup);
+
+      if (!qrRecord) {
+        results.push({
+          local_attempt_id: localAttemptId,
+          ok: false,
+          status: "login_token_record_not_found",
+          user_id: userId,
+          token_id: tokenId || undefined,
+          qr_hash: qrHash || undefined,
+        });
+        continue;
+      }
+
+      if (String(qrRecord.userId || "") !== String(userId)) {
+        results.push({
+          local_attempt_id: localAttemptId,
+          ok: false,
+          status: "token_user_mismatch",
+          user_id: userId,
+          token_id: tokenId || undefined,
+        });
+        continue;
+      }
+
+      if (new Date(qrRecord.expiresAt) <= scannedAt) {
+        results.push({
+          local_attempt_id: localAttemptId,
+          ok: false,
+          status: "token_was_expired_at_scan_time",
+          user_id: userId,
+          token_id: tokenId || undefined,
+        });
+        continue;
+      }
+
+      const marked = await QrToken.findOneAndUpdate(
+        {
+          _id: qrRecord._id,
+          used: false,
+        },
+        {
+          $set: { used: true },
+        },
+        { new: true },
+      );
+
+      if (!marked) {
+        results.push({
+          local_attempt_id: localAttemptId,
+          ok: false,
+          status: "token_already_used_or_replayed",
+          user_id: userId,
+          token_id: tokenId || undefined,
+          qr_hash: qrHash || undefined,
+        });
         continue;
       }
 
       results.push({
         local_attempt_id: localAttemptId,
         ok: true,
-        status: "verified_signed_token_without_db_record",
+        status: "verified_and_marked_used",
         user_id: userId,
+        token_id: tokenId || undefined,
+        qr_hash: qrHash || undefined,
       });
     }
 

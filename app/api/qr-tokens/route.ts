@@ -3,6 +3,20 @@ import dbConnect from "@/lib/dbConnect";
 import QrToken from "@/models/qrToken";
 import User from "@/models/User";
 
+type ExistingDiscountTokenLean = {
+  used?: boolean;
+};
+
+type StoredQrTokenLean = {
+  token: string;
+  userId: unknown;
+  type: string;
+  used?: boolean;
+  discountPercent?: number;
+  receiptTransactionId?: string | null;
+  expiresAt?: Date | string | null;
+};
+
 function cleanString(value: unknown): string {
   return String(value ?? "").trim();
 }
@@ -10,6 +24,16 @@ function cleanString(value: unknown): string {
 function cleanNumber(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function parseBool(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "boolean") return value;
+
+  const raw = cleanString(value).toLowerCase();
+  if (["true", "1", "yes", "used"].includes(raw)) return true;
+  if (["false", "0", "no", "unused"].includes(raw)) return false;
+  return undefined;
 }
 
 function parseExpiresAt(value: unknown): Date {
@@ -60,6 +84,7 @@ export async function POST(req: NextRequest) {
     );
 
     const expiresAt = parseExpiresAt(body?.expiresAt || body?.expires_at);
+    const requestedUsed = parseBool(body?.used ?? body?.is_used);
 
     if (!userId) {
       return NextResponse.json(
@@ -81,7 +106,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const user = await User.findById(userId).lean();
+    const user = await User.findById(userId).lean().exec();
 
     if (!user) {
       return NextResponse.json(
@@ -93,7 +118,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const qrToken = await QrToken.findOneAndUpdate(
+    const existingToken = (await QrToken.findOne({
+      token: qrCode,
+      type: "discount",
+    })
+      .select("used")
+      .lean()
+      .exec()) as ExistingDiscountTokenLean | null;
+
+    /*
+      Never re-enable an already-used discount coupon during retry/sync.
+
+      Rules:
+      1. If booth says used=true, website stores used=true.
+      2. If website already has used=true, keep it used.
+      3. If booth retries the same coupon sync without used=true, do not reset it.
+    */
+    const nextUsed =
+      requestedUsed === true ? true : Boolean(existingToken?.used);
+
+    const qrToken = (await QrToken.findOneAndUpdate(
       {
         token: qrCode,
         type: "discount",
@@ -103,7 +147,7 @@ export async function POST(req: NextRequest) {
           token: qrCode,
           userId,
           type: "discount",
-          used: false,
+          used: nextUsed,
           discountPercent,
           source,
           receiptTransactionId: receiptTransactionId || null,
@@ -115,7 +159,19 @@ export async function POST(req: NextRequest) {
         upsert: true,
         setDefaultsOnInsert: true,
       },
-    );
+    )
+      .lean()
+      .exec()) as StoredQrTokenLean | null;
+
+    if (!qrToken) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Failed to store QR token",
+        },
+        { status: 500 },
+      );
+    }
 
     return NextResponse.json(
       {

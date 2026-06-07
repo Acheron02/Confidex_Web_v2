@@ -222,6 +222,80 @@ async function patchMatchingTransactionItem(params: {
   };
 }
 
+async function ensureTransactionForResult(params: {
+  user_id: string;
+  transaction_id: string;
+  productID: string;
+  result: string;
+}) {
+  const user_id = clean(params.user_id);
+  const transaction_id = clean(params.transaction_id);
+  const productID = clean(params.productID);
+
+  if (
+    !user_id ||
+    !transaction_id ||
+    !mongoose.Types.ObjectId.isValid(user_id)
+  ) {
+    return { ensured: false, reason: "missing_or_invalid_user_or_transaction" };
+  }
+
+  const userObjectId = new mongoose.Types.ObjectId(user_id);
+  const txObjectId = mongoose.Types.ObjectId.isValid(transaction_id)
+    ? new mongoose.Types.ObjectId(transaction_id)
+    : null;
+
+  const txOr: Record<string, unknown>[] = [
+    { transaction_id },
+    { transactionID: transaction_id },
+    { transactionId: transaction_id },
+    { local_transaction_id: transaction_id },
+    { offline_local_transaction_id: transaction_id },
+    { payment_reference: transaction_id },
+    { website_transaction_id: transaction_id },
+    { websiteTransactionId: transaction_id },
+  ];
+
+  if (txObjectId) txOr.unshift({ _id: txObjectId });
+
+  const existing = await Transaction.findOne({
+    user_id: userObjectId,
+    $or: txOr,
+  });
+
+  if (existing) {
+    return {
+      ensured: true,
+      created: false,
+      transaction_id: String(existing._id),
+    };
+  }
+
+  const created = await Transaction.create({
+    user_id: userObjectId,
+    transaction_id,
+    transactionID: transaction_id,
+    transactionId: transaction_id,
+    local_transaction_id: transaction_id,
+    offline_local_transaction_id: transaction_id,
+    status: "completed",
+    payment_status: "paid",
+    payment_reference: transaction_id,
+    payment_method: transaction_id.startsWith("LOCAL-CASH-") ? "cash" : "booth",
+    offline_synced_from_booth: transaction_id.startsWith("LOCAL-"),
+    purchasedDate: new Date(),
+    items: [
+      {
+        name: productID || "Test Kit",
+        productID: productID || "UNKNOWN",
+        result: normalizePublicResult(params.result),
+      },
+    ],
+  });
+
+  return { ensured: true, created: true, transaction_id: String(created._id) };
+}
+
 export async function GET(req: NextRequest) {
   try {
     await dbConnect();
@@ -365,12 +439,32 @@ export async function POST(req: Request) {
       },
     );
 
-    const transactionPatch = await patchMatchingTransactionItem({
+    let transactionPatch = await patchMatchingTransactionItem({
       user_id,
       transaction_id,
       productID,
       result,
     });
+
+    let transactionEnsure: Record<string, unknown> | null = null;
+
+    if (!transactionPatch.matched) {
+      transactionEnsure = await ensureTransactionForResult({
+        user_id,
+        transaction_id,
+        productID,
+        result,
+      });
+
+      if (transactionEnsure?.ensured) {
+        transactionPatch = await patchMatchingTransactionItem({
+          user_id,
+          transaction_id,
+          productID,
+          result,
+        });
+      }
+    }
 
     if (!transactionPatch.matched) {
       console.warn("[RESULTS API][POST] Transaction patch did not match:", {
@@ -379,6 +473,7 @@ export async function POST(req: Request) {
         productID,
         result,
         transactionPatch,
+        transactionEnsure,
       });
     }
 
@@ -394,6 +489,7 @@ export async function POST(req: Request) {
         success: true,
         result: serialized,
         transaction_patch: transactionPatch,
+        transaction_ensure: transactionEnsure,
       },
       { status: 200 },
     );
