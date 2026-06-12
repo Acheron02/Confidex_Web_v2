@@ -131,7 +131,7 @@ npm run build
 Start the production server:
 
 ```bash
-npm run start
+npm run start:tunnel
 ```
 
 The project uses local configuration files for database access, authentication, storage, email, payment, and booth communication settings. Keep all credentials and private values out of the repository.
