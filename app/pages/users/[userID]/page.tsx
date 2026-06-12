@@ -156,7 +156,13 @@ export default function DashboardPage() {
   const reviewTarget = useMemo(() => {
     if (!reviewTxId) return null;
 
-    return allItems.find((item) => String(item.txId) === reviewTxId) ?? null;
+    return (
+      allItems.find(
+        (item) =>
+          String(item.txId) === reviewTxId ||
+          String(item.receiptTransactionId) === reviewTxId,
+      ) ?? null
+    );
   }, [allItems, reviewTxId]);
 
   const isSubmittingReview = Boolean(

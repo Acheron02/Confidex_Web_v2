@@ -321,6 +321,25 @@ export function ResultReviewsSection({
   const [reviewNotes, setReviewNotes] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [imageLoading, setImageLoading] = React.useState(true);
+  const [failedImageIds, setFailedImageIds] = React.useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const hasResultImage = React.useCallback(
+    (item: ResultReviewRecord | null) =>
+      Boolean(
+        item?.result_image &&
+        item?._id &&
+        !failedImageIds.has(String(item._id)),
+      ),
+    [failedImageIds],
+  );
+
+  const markResultImageFailed = React.useCallback((id?: string) => {
+    const cleanId = String(id || "").trim();
+    if (!cleanId) return;
+    setFailedImageIds((current) => new Set(current).add(cleanId));
+  }, []);
 
   const [search, setSearch] = React.useState("");
   const [currentPage, setCurrentPage] = React.useState(1);
@@ -379,8 +398,8 @@ export function ResultReviewsSection({
 
     setOverrideResult("Negative");
     setReviewNotes("");
-    setImageLoading(true);
-  }, [selected]);
+    setImageLoading(hasResultImage(selected));
+  }, [selected, hasResultImage]);
 
   React.useEffect(() => {
     setCurrentPage(1);
@@ -698,15 +717,22 @@ export function ResultReviewsSection({
                             <td className="px-4 py-3 text-center align-middle">
                               <button
                                 type="button"
-                                onClick={() => setSelected(item)}
+                                onClick={() => {
+                                  setImageLoading(hasResultImage(item));
+                                  setSelected(item);
+                                }}
                                 className="group relative mx-auto h-16 w-20 overflow-hidden rounded-xl border bg-muted"
                               >
-                                {item.result_image ? (
+                                {hasResultImage(item) ? (
                                   <img
+                                    key={`${item._id}:${item.result_image}`}
                                     src={item.result_image}
                                     alt="Under review result"
                                     className="h-full w-full object-cover transition group-hover:scale-105"
                                     loading="lazy"
+                                    onError={() =>
+                                      markResultImageFailed(item._id)
+                                    }
                                   />
                                 ) : (
                                   <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">
@@ -961,15 +987,25 @@ export function ResultReviewsSection({
                   <div className="absolute inset-0 animate-pulse bg-muted/20" />
                 ) : null}
 
-                <img
-                  src={selected.result_image}
-                  alt="Result under review"
-                  className={`h-full max-h-[78vh] w-full object-contain transition-opacity ${
-                    imageLoading ? "opacity-0" : "opacity-100"
-                  }`}
-                  onLoad={() => setImageLoading(false)}
-                  onError={() => setImageLoading(false)}
-                />
+                {hasResultImage(selected) ? (
+                  <img
+                    key={`${selected._id}:${selected.result_image}`}
+                    src={selected.result_image}
+                    alt="Result under review"
+                    className={`h-full max-h-[78vh] w-full object-contain transition-opacity ${
+                      imageLoading ? "opacity-0" : "opacity-100"
+                    }`}
+                    onLoad={() => setImageLoading(false)}
+                    onError={() => {
+                      markResultImageFailed(selected._id);
+                      setImageLoading(false);
+                    }}
+                  />
+                ) : (
+                  <div className="flex h-full min-h-[320px] items-center justify-center text-sm text-white/70">
+                    No image uploaded yet
+                  </div>
+                )}
               </div>
             </div>
 

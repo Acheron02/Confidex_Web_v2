@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import mongoose from "mongoose";
+
 import dbConnect from "@/lib/dbConnect";
 import Result from "@/models/results";
+import Transaction from "@/models/transactions";
 import { broadcast } from "@/server/webSocket";
 
 function clean(value: unknown) {
@@ -13,19 +16,59 @@ function normalizeReviewValue(value: unknown) {
     .replace(/[\s_-]+/g, " ");
 }
 
+function normalizePublicResult(value: unknown) {
+  const raw = clean(value);
+  const normalized = normalizeReviewValue(raw);
+
+  if (!raw) return "Pending";
+
+  if (normalized === "positive") return "Positive";
+  if (normalized === "negative") return "Negative";
+  if (normalized === "invalid") return "Invalid";
+  if (normalized === "pending") return "Pending";
+
+  if (
+    normalized.includes("no object detected") ||
+    normalized.includes("no object") ||
+    normalized.includes("not detected") ||
+    normalized.includes("uncertain") ||
+    normalized.includes("error") ||
+    normalized.includes("failed")
+  ) {
+    return "Invalid";
+  }
+
+  return raw;
+}
+
 function shouldRequireReview(result: unknown) {
   const normalized = normalizeReviewValue(result);
 
   return (
     normalized.includes("invalid") ||
     normalized.includes("no object detected") ||
+    normalized.includes("no object") ||
     normalized.includes("uncertain") ||
     normalized.includes("error") ||
-    normalized.includes("not detected")
+    normalized.includes("not detected") ||
+    normalized.includes("failed")
   );
 }
 
+function toObjectIdIfValid(value: unknown) {
+  const raw = clean(value);
+
+  if (mongoose.Types.ObjectId.isValid(raw)) {
+    return new mongoose.Types.ObjectId(raw);
+  }
+
+  return raw;
+}
+
 function serializeResult(item: any) {
+  const rawResult = clean(item?.result || "Pending");
+  const publicResult = normalizePublicResult(rawResult);
+
   const resultImage = clean(item?.result_image || item?.annotated_image);
   const annotatedImage = clean(item?.annotated_image || item?.result_image);
 
@@ -37,16 +80,12 @@ function serializeResult(item: any) {
     user_id: String(item?.user_id ?? ""),
     productID: clean(item?.productID),
     transaction_id: clean(item?.transaction_id),
-    result: clean(item?.result || "Pending"),
+    result: publicResult,
 
     testedDate: item?.testedDate,
     updatedAt: item?.updatedAt,
     createdAt: item?.createdAt,
 
-    /**
-     * Result / annotated image.
-     * This is the image with only RESULT: POSITIVE / NEGATIVE / INVALID.
-     */
     result_image: resultImage,
     resultImageUrl: resultImage,
     result_image_url: resultImage,
@@ -55,10 +94,6 @@ function serializeResult(item: any) {
     annotatedImageUrl: annotatedImage,
     annotated_image_url: annotatedImage,
 
-    /**
-     * Original / raw image.
-     * This is the untouched captured photo for reviewing.
-     */
     original_image: originalImage,
     originalImageUrl: originalImage,
     original_image_url: originalImage,
@@ -68,12 +103,197 @@ function serializeResult(item: any) {
     raw_image_url: rawImage,
 
     review_status: clean(item?.review_status || "none"),
-    original_result: clean(item?.original_result),
+    original_result: clean(
+      item?.original_result || (publicResult !== rawResult ? rawResult : ""),
+    ),
     override_result: clean(item?.override_result),
     reviewed_by: item?.reviewed_by ? String(item.reviewed_by) : null,
     reviewed_at: item?.reviewed_at ?? null,
     review_notes: clean(item?.review_notes),
   };
+}
+
+async function patchMatchingTransactionItem(params: {
+  user_id: string;
+  transaction_id: string;
+  productID: string;
+  result: string;
+}) {
+  const user_id = clean(params.user_id);
+  const transaction_id = clean(params.transaction_id);
+  const productID = clean(params.productID);
+  const result = normalizePublicResult(params.result);
+
+  if (!user_id || !transaction_id || !result || result === "Pending") {
+    return {
+      patched: false,
+      reason: "missing_required_fields_or_pending_result",
+    };
+  }
+
+  const txObjectId = mongoose.Types.ObjectId.isValid(transaction_id)
+    ? new mongoose.Types.ObjectId(transaction_id)
+    : null;
+
+  const userObjectId = mongoose.Types.ObjectId.isValid(user_id)
+    ? new mongoose.Types.ObjectId(user_id)
+    : null;
+
+  const txOr: Record<string, unknown>[] = [
+    { transaction_id },
+    { transactionID: transaction_id },
+    { transactionId: transaction_id },
+    { website_transaction_id: transaction_id },
+    { websiteTransactionId: transaction_id },
+  ];
+
+  if (txObjectId) {
+    txOr.unshift({ _id: txObjectId });
+  }
+
+  const userOr: Record<string, unknown>[] = [{ user_id }];
+
+  if (userObjectId) {
+    userOr.unshift({ user_id: userObjectId });
+  }
+
+  const baseQueries = [
+    {
+      $and: [{ $or: txOr }, { $or: userOr }],
+    },
+    {
+      $or: txOr,
+    },
+  ];
+
+  const setData = {
+    status: "completed",
+    payment_status: "paid",
+    updatedAt: new Date(),
+  };
+
+  for (const baseQuery of baseQueries) {
+    if (productID) {
+      const exactItemResult = await Transaction.updateOne(
+        {
+          ...baseQuery,
+          "items.productID": productID,
+        },
+        {
+          $set: {
+            ...setData,
+            "items.$.result": result,
+          },
+        },
+      );
+
+      if (exactItemResult.matchedCount > 0) {
+        return {
+          patched: exactItemResult.modifiedCount > 0,
+          matched: exactItemResult.matchedCount,
+          modified: exactItemResult.modifiedCount,
+          mode: "matched_product_item",
+        };
+      }
+    }
+
+    const firstItemResult = await Transaction.updateOne(baseQuery, {
+      $set: {
+        ...setData,
+        "items.0.result": result,
+      },
+    });
+
+    if (firstItemResult.matchedCount > 0) {
+      return {
+        patched: firstItemResult.modifiedCount > 0,
+        matched: firstItemResult.matchedCount,
+        modified: firstItemResult.modifiedCount,
+        mode: "first_item_fallback",
+      };
+    }
+  }
+
+  return {
+    patched: false,
+    matched: 0,
+    modified: 0,
+    reason: "transaction_not_found",
+  };
+}
+
+async function ensureTransactionForResult(params: {
+  user_id: string;
+  transaction_id: string;
+  productID: string;
+  result: string;
+}) {
+  const user_id = clean(params.user_id);
+  const transaction_id = clean(params.transaction_id);
+  const productID = clean(params.productID);
+
+  if (
+    !user_id ||
+    !transaction_id ||
+    !mongoose.Types.ObjectId.isValid(user_id)
+  ) {
+    return { ensured: false, reason: "missing_or_invalid_user_or_transaction" };
+  }
+
+  const userObjectId = new mongoose.Types.ObjectId(user_id);
+  const txObjectId = mongoose.Types.ObjectId.isValid(transaction_id)
+    ? new mongoose.Types.ObjectId(transaction_id)
+    : null;
+
+  const txOr: Record<string, unknown>[] = [
+    { transaction_id },
+    { transactionID: transaction_id },
+    { transactionId: transaction_id },
+    { local_transaction_id: transaction_id },
+    { offline_local_transaction_id: transaction_id },
+    { payment_reference: transaction_id },
+    { website_transaction_id: transaction_id },
+    { websiteTransactionId: transaction_id },
+  ];
+
+  if (txObjectId) txOr.unshift({ _id: txObjectId });
+
+  const existing = await Transaction.findOne({
+    user_id: userObjectId,
+    $or: txOr,
+  });
+
+  if (existing) {
+    return {
+      ensured: true,
+      created: false,
+      transaction_id: String(existing._id),
+    };
+  }
+
+  const created = await Transaction.create({
+    user_id: userObjectId,
+    transaction_id,
+    transactionID: transaction_id,
+    transactionId: transaction_id,
+    local_transaction_id: transaction_id,
+    offline_local_transaction_id: transaction_id,
+    status: "completed",
+    payment_status: "paid",
+    payment_reference: transaction_id,
+    payment_method: transaction_id.startsWith("LOCAL-CASH-") ? "cash" : "booth",
+    offline_synced_from_booth: transaction_id.startsWith("LOCAL-"),
+    purchasedDate: new Date(),
+    items: [
+      {
+        name: productID || "Test Kit",
+        productID: productID || "UNKNOWN",
+        result: normalizePublicResult(params.result),
+      },
+    ],
+  });
+
+  return { ensured: true, created: true, transaction_id: String(created._id) };
 }
 
 export async function GET(req: NextRequest) {
@@ -93,7 +313,11 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const results = await Result.find({ user_id: userId })
+    const userQuery = mongoose.Types.ObjectId.isValid(userId)
+      ? new mongoose.Types.ObjectId(userId)
+      : userId;
+
+    const results = await Result.find({ user_id: userQuery })
       .select(
         [
           "_id",
@@ -145,7 +369,8 @@ export async function POST(req: Request) {
 
     const user_id = clean(data?.user_id);
     const productID = clean(data?.productID);
-    const result = clean(data?.result);
+    const rawResult = clean(data?.result);
+    const result = normalizePublicResult(rawResult);
     const transaction_id = clean(data?.transaction_id);
 
     const result_image = clean(
@@ -162,25 +387,26 @@ export async function POST(req: Request) {
         data?.rawImageUrl,
     );
 
-    if (!user_id || !productID || !result || !transaction_id) {
+    if (!user_id || !productID || !rawResult || !transaction_id) {
       return NextResponse.json(
         {
           error: "Missing required fields",
-          received: { user_id, productID, result, transaction_id },
+          received: { user_id, productID, result: rawResult, transaction_id },
         },
         { status: 400 },
       );
     }
 
-    const needsReview = shouldRequireReview(result);
+    const userObjectId = toObjectIdIfValid(user_id);
+    const needsReview = shouldRequireReview(rawResult) || result === "Invalid";
 
     const setData: Record<string, unknown> = {
-      user_id,
+      user_id: userObjectId,
       productID,
       result,
       transaction_id,
       review_status: needsReview ? "under_review" : "none",
-      original_result: needsReview ? result : "",
+      original_result: needsReview ? rawResult : "",
       override_result: "",
       reviewed_by: null,
       reviewed_at: null,
@@ -198,7 +424,7 @@ export async function POST(req: Request) {
     }
 
     const updatedResult = await Result.findOneAndUpdate(
-      { user_id, transaction_id },
+      { user_id: userObjectId, transaction_id },
       {
         $set: setData,
         $setOnInsert: {
@@ -213,15 +439,57 @@ export async function POST(req: Request) {
       },
     );
 
+    let transactionPatch = await patchMatchingTransactionItem({
+      user_id,
+      transaction_id,
+      productID,
+      result,
+    });
+
+    let transactionEnsure: Record<string, unknown> | null = null;
+
+    if (!transactionPatch.matched) {
+      transactionEnsure = await ensureTransactionForResult({
+        user_id,
+        transaction_id,
+        productID,
+        result,
+      });
+
+      if (transactionEnsure?.ensured) {
+        transactionPatch = await patchMatchingTransactionItem({
+          user_id,
+          transaction_id,
+          productID,
+          result,
+        });
+      }
+    }
+
+    if (!transactionPatch.matched) {
+      console.warn("[RESULTS API][POST] Transaction patch did not match:", {
+        user_id,
+        transaction_id,
+        productID,
+        result,
+        transactionPatch,
+        transactionEnsure,
+      });
+    }
+
+    const serialized = serializeResult(updatedResult);
+
     broadcast({
       type: "new_result",
-      result: serializeResult(updatedResult),
+      result: serialized,
     });
 
     return NextResponse.json(
       {
         success: true,
-        result: serializeResult(updatedResult),
+        result: serialized,
+        transaction_patch: transactionPatch,
+        transaction_ensure: transactionEnsure,
       },
       { status: 200 },
     );

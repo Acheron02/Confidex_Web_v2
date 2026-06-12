@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { startRegistration } from "@simplewebauthn/browser";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PhoneInput } from "../ui/phone-input";
@@ -253,36 +252,9 @@ export function Register({ onSwitchToLogin, onClose }: RegisterProps) {
       const verifyData = await verifyRes.json();
 
       if (!verifyRes.ok) {
-        setLoading(false);
         setStatus(verifyData.error || "Verification failed");
         setRetryAfterSeconds(Number(verifyData.retryAfterSeconds ?? 0));
         return;
-      }
-
-      try {
-        const optionsRes = await fetch("/api/auth/passkey/register/options", {
-          method: "POST",
-        });
-        const options = await optionsRes.json();
-
-        if (optionsRes.ok) {
-          const credential = await startRegistration({ optionsJSON: options });
-
-          const finishRes = await fetch("/api/auth/passkey/register/verify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              credential,
-              expectedChallenge: options.challenge,
-            }),
-          });
-
-          if (!finishRes.ok) {
-            setStatus("Registered, but passkey setup was skipped.");
-          }
-        }
-      } catch {
-        setStatus("Registered, but passkey setup was skipped.");
       }
 
       setRetryAfterSeconds(0);
@@ -291,8 +263,11 @@ export function Register({ onSwitchToLogin, onClose }: RegisterProps) {
       clearOtpFlow();
       onClose();
       router.push(`/pages/users/${verifyData.user._id}`);
-    } catch {
-      setStatus("Verification failed");
+    } catch (error) {
+      console.error("[REGISTER OTP VERIFY] error:", error);
+      setStatus(
+        "Verification failed. Please check your connection and try again.",
+      );
     } finally {
       setLoading(false);
     }

@@ -3,6 +3,11 @@ import { parseDateTime } from "@/app/utils/dashboard/ph-time";
 export interface TransactionItem {
   name: string;
   productID: string;
+  type?: string;
+  price?: number;
+  discount?: number;
+  finalPrice?: number;
+  result?: string;
 }
 
 export interface Transaction {
@@ -68,6 +73,17 @@ export const fetchUserTransactions = async (
           ? tx.items.map((item: any) => ({
               name: String(item.name ?? ""),
               productID: String(item.productID ?? ""),
+              type: item.type ? String(item.type) : undefined,
+              price: Number.isFinite(Number(item.price))
+                ? Number(item.price)
+                : undefined,
+              discount: Number.isFinite(Number(item.discount))
+                ? Number(item.discount)
+                : undefined,
+              finalPrice: Number.isFinite(Number(item.finalPrice))
+                ? Number(item.finalPrice)
+                : undefined,
+              result: item.result ? String(item.result) : undefined,
             }))
           : [],
         purchasedDate: normalizeDateForDisplay(tx),

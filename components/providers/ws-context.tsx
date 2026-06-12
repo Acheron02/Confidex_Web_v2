@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useAuth } from "@/components/providers/auth-context";
 
 interface WSContextValue {
   ws: WebSocket | null;
@@ -19,7 +20,7 @@ const WSContext = createContext<WSContextValue>({
   isReady: false,
 });
 
-const MIN_RECONNECT_DELAY_MS = 1000;
+const MIN_RECONNECT_DELAY_MS = 1500;
 const MAX_RECONNECT_DELAY_MS = 30000;
 
 function getReconnectDelay(attempt: number) {
@@ -28,19 +29,31 @@ function getReconnectDelay(attempt: number) {
     MIN_RECONNECT_DELAY_MS * 2 ** Math.max(0, attempt),
   );
 
-  const jitter = Math.floor(Math.random() * 750);
+  const jitter = Math.floor(Math.random() * 1000);
   return baseDelay + jitter;
 }
 
+function getWebSocketUrl() {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws`;
+}
+
 export const WSProvider = ({ children }: { children: React.ReactNode }) => {
+  const { user, loading } = useAuth();
+
   const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const reconnectAttemptRef = useRef(0);
+  const shouldConnectRef = useRef(false);
+
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    let isUnmounted = false;
+    const shouldConnect = Boolean(user?._id) && !loading;
+    shouldConnectRef.current = shouldConnect;
 
     const clearReconnect = () => {
       if (reconnectTimeoutRef.current) {
@@ -49,8 +62,41 @@ export const WSProvider = ({ children }: { children: React.ReactNode }) => {
       }
     };
 
+    const closeCurrentSocket = () => {
+      clearReconnect();
+
+      const current = socketRef.current;
+      socketRef.current = null;
+
+      setWs(null);
+      setIsReady(false);
+
+      if (
+        current &&
+        (current.readyState === WebSocket.OPEN ||
+          current.readyState === WebSocket.CONNECTING)
+      ) {
+        try {
+          current.close(1000, "Client no longer needs live updates");
+        } catch {}
+      }
+    };
+
+    if (!shouldConnect) {
+      closeCurrentSocket();
+      return;
+    }
+
+    let isUnmounted = false;
+
     const scheduleReconnect = (connect: () => void) => {
-      if (isUnmounted || reconnectTimeoutRef.current) return;
+      if (
+        isUnmounted ||
+        !shouldConnectRef.current ||
+        reconnectTimeoutRef.current
+      ) {
+        return;
+      }
 
       const delay = getReconnectDelay(reconnectAttemptRef.current);
       reconnectAttemptRef.current += 1;
@@ -66,7 +112,7 @@ export const WSProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     const connect = () => {
-      if (isUnmounted) return;
+      if (isUnmounted || !shouldConnectRef.current) return;
 
       const current = socketRef.current;
       if (
@@ -77,14 +123,13 @@ export const WSProvider = ({ children }: { children: React.ReactNode }) => {
         return;
       }
 
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      const socket = new WebSocket(getWebSocketUrl());
 
       socketRef.current = socket;
       setWs(socket);
 
       socket.onopen = () => {
-        if (isUnmounted) return;
+        if (isUnmounted || !shouldConnectRef.current) return;
 
         reconnectAttemptRef.current = 0;
         clearReconnect();
@@ -99,14 +144,18 @@ export const WSProvider = ({ children }: { children: React.ReactNode }) => {
         if (isUnmounted) return;
 
         setIsReady(false);
-        socketRef.current = null;
-        setWs(null);
-        scheduleReconnect(connect);
+
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+          setWs(null);
+        }
+
+        if (shouldConnectRef.current) {
+          scheduleReconnect(connect);
+        }
       };
 
       socket.onerror = () => {
-        // Let onclose handle the reconnect. Keeping this quiet prevents noisy logs
-        // during weak 4G/5G modem drops.
         if (process.env.NODE_ENV !== "production") {
           console.warn("[WS] Temporary socket error");
         }
@@ -114,22 +163,37 @@ export const WSProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     const handleOnline = () => {
+      if (!shouldConnectRef.current) return;
+
       reconnectAttemptRef.current = 0;
       clearReconnect();
       connect();
     };
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && shouldConnectRef.current) {
+        const current = socketRef.current;
+
+        if (!current || current.readyState === WebSocket.CLOSED) {
+          reconnectAttemptRef.current = 0;
+          clearReconnect();
+          connect();
+        }
+      }
+    };
+
     connect();
+
     window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       isUnmounted = true;
       window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       clearReconnect();
-      socketRef.current?.close();
-      socketRef.current = null;
     };
-  }, []);
+  }, [user?._id, loading]);
 
   const value = useMemo(() => ({ ws, isReady }), [ws, isReady]);
 

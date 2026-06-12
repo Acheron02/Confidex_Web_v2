@@ -6,13 +6,24 @@ type SendAdminOtpEmailParams = {
   otp: string;
 };
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_EMAIL,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
+let cachedTransporter: nodemailer.Transporter | null = null;
+
+function getTransporter() {
+  if (cachedTransporter) return cachedTransporter;
+
+  cachedTransporter = nodemailer.createTransport({
+    service: "gmail",
+    pool: true,
+    maxConnections: 2,
+    maxMessages: 100,
+    auth: {
+      user: process.env.GMAIL_EMAIL,
+      pass: process.env.GMAIL_APP_PASSWORD,
+    },
+  });
+
+  return cachedTransporter;
+}
 
 export async function sendAdminOtpEmail({
   to,
@@ -20,6 +31,8 @@ export async function sendAdminOtpEmail({
   otp,
 }: SendAdminOtpEmailParams) {
   try {
+    const transporter = getTransporter();
+
     await transporter.sendMail({
       from: `"Confidex" <${process.env.GMAIL_EMAIL}>`,
       to,
@@ -37,7 +50,6 @@ If you did not request this, please ignore this email.
 
       html: `
       <div style="font-family: Arial, sans-serif; padding: 16px; color: #333;">
-
         <p>Hello${name ? ` <strong>${name}</strong>` : ""},</p>
 
         <p>This code is required to complete your <strong>admin login</strong>.</p>

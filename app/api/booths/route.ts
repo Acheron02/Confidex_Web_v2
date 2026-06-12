@@ -15,22 +15,53 @@ const DEFAULT_COINS = {
   "1": { stock: 0, enabled: true },
 };
 
+type BoothLeanDoc = {
+  _id: unknown;
+  name?: string;
+  location?: string;
+  installationDate?: Date | string | null;
+  status?: string;
+  deviceId?: string;
+  deviceSecretHash?: string;
+  isOnline?: boolean;
+  lastSeenAt?: Date | string | null;
+  configVersion?: number;
+  inventoryVersion?: number;
+  config?: {
+    products?: unknown[];
+    [key: string]: unknown;
+  };
+  inventorySnapshot?: {
+    products?: Record<string, unknown>;
+    coins?: typeof DEFAULT_COINS;
+    [key: string]: unknown;
+  };
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+  [key: string]: unknown;
+};
+
 export async function GET() {
   try {
     await dbConnect();
-    const booths = await Booth.find()
+
+    const booths = (await Booth.find()
       .sort({
         installationDate: -1,
         createdAt: -1,
       })
-      .lean();
+      .lean()
+      .exec()) as BoothLeanDoc[];
 
     return NextResponse.json(
-      { booths: booths.map((booth) => withBoothPresence(booth)) },
+      {
+        booths: booths.map((booth) => withBoothPresence(booth)),
+      },
       { status: 200 },
     );
   } catch (error) {
     console.error("Get booths error:", error);
+
     return NextResponse.json(
       { error: "Failed to fetch booths" },
       { status: 500 },
@@ -75,10 +106,12 @@ export async function POST(req: Request) {
       },
     });
 
+    const boothObject = booth.toObject() as BoothLeanDoc;
+
     return NextResponse.json(
       {
         message: "Booth added successfully",
-        booth: withBoothPresence(booth.toObject()),
+        booth: withBoothPresence(boothObject),
         deviceCredentials: {
           deviceId,
           deviceSecret,
@@ -88,6 +121,7 @@ export async function POST(req: Request) {
     );
   } catch (error) {
     console.error("Add booth error:", error);
+
     return NextResponse.json({ error: "Failed to add booth" }, { status: 500 });
   }
 }

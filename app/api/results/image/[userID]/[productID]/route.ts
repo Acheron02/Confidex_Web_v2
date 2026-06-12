@@ -94,13 +94,14 @@ function serializeResult(item: any) {
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { userID: string; productID: string } },
+  { params }: { params: Promise<{ userID: string; productID: string }> },
 ) {
   try {
     await dbConnect();
 
-    const userID = clean(params.userID);
-    const productID = clean(params.productID);
+    const { userID: rawUserID, productID: rawProductID } = await params;
+    const userID = clean(rawUserID);
+    const productID = clean(rawProductID);
 
     if (!userID || !productID) {
       return NextResponse.json(
@@ -110,7 +111,6 @@ export async function POST(
     }
 
     const formData = await req.formData();
-
     const file = formData.get("file") as File | null;
 
     if (!file) {

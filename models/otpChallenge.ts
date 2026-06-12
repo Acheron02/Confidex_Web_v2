@@ -1,4 +1,4 @@
-import mongoose, { Schema, models, model } from "mongoose";
+import { Schema, models, model } from "mongoose";
 
 const OtpChallengeSchema = new Schema(
   {
@@ -10,10 +10,10 @@ const OtpChallengeSchema = new Schema(
       index: true,
     },
     otpHash: { type: String, required: true },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true },
     attempts: { type: Number, default: 0 },
     consumedAt: { type: Date, default: null },
-    payload: { type: Schema.Types.Mixed, default: null }, // temp form for register
+    payload: { type: Schema.Types.Mixed, default: null },
   },
   { timestamps: true },
 );

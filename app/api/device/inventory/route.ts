@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateBoothDevice } from "@/lib/deviceAuth";
+import {
+  normalizeInventorySnapshot,
+  sendInventoryStockAlertEmail,
+} from "@/lib/inventory-mail";
 
-type InventoryProductMap = Record<string, { stock: number }>;
+type InventoryProductMap = Record<string, { stock: number; enabled?: boolean }>;
 type InventoryCoinMap = Record<string, { stock: number; enabled: boolean }>;
 
 const DEFAULT_COINS: InventoryCoinMap = {
@@ -30,6 +34,7 @@ function sanitizeInventorySnapshot(value: unknown): {
 
     products[cleanId] = {
       stock: Math.max(0, Number(productValue?.stock) || 0),
+      enabled: Boolean(productValue?.enabled ?? true),
     };
   }
 
@@ -71,6 +76,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const previousInventory = normalizeInventorySnapshot(
+      booth.inventorySnapshot || {
+        products: {},
+        coins: DEFAULT_COINS,
+      },
+    );
+
     const nextInventorySnapshot = {
       products: nextInventory.products,
       coins: nextInventory.coins || DEFAULT_COINS,
@@ -79,12 +91,37 @@ export async function POST(req: NextRequest) {
     booth.lastSeenAt = new Date();
     booth.isOnline = true;
 
-    if (!deepEqual(booth.inventorySnapshot || {}, nextInventorySnapshot)) {
+    const inventoryChanged = !deepEqual(
+      booth.inventorySnapshot || {},
+      nextInventorySnapshot,
+    );
+
+    if (inventoryChanged) {
       booth.inventorySnapshot = nextInventorySnapshot;
       booth.inventoryVersion = Number(booth.inventoryVersion || 0) + 1;
     }
 
     await booth.save();
+
+    let stockAlertResult: Awaited<
+      ReturnType<typeof sendInventoryStockAlertEmail>
+    > | null = null;
+
+    if (inventoryChanged) {
+      try {
+        stockAlertResult = await sendInventoryStockAlertEmail({
+          booth,
+          previousInventory,
+          nextInventory: nextInventorySnapshot,
+          source: "Booth HTTP inventory sync",
+        });
+      } catch (emailError) {
+        console.error(
+          "[INVENTORY EMAIL] Failed to send HTTP inventory stock alert:",
+          emailError,
+        );
+      }
+    }
 
     return NextResponse.json({
       ok: true,
@@ -94,6 +131,8 @@ export async function POST(req: NextRequest) {
         products: {},
         coins: DEFAULT_COINS,
       },
+      inventoryChanged,
+      stockAlert: stockAlertResult,
     });
   } catch (error: any) {
     return NextResponse.json(

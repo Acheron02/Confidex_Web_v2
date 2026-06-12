@@ -138,14 +138,14 @@ export default function ContactPage() {
 
   return (
     <section className="relative min-h-[calc(100svh-var(--navbar-height)-var(--footer-height))] overflow-hidden bg-background pt-[calc(var(--navbar-height)+1.25rem)] pb-[calc(var(--footer-height)+1.25rem)] sm:pt-[calc(var(--navbar-height)+2rem)] sm:pb-[calc(var(--footer-height)+2rem)]">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_right,rgba(196,106,42,0.18),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(36,87,165,0.12),transparent_30%)]" />
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_right,rgba(196,106,42,0.16),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(36,87,165,0.10),transparent_30%)] dark:bg-[radial-gradient(circle_at_top_right,rgba(244,211,94,0.10),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(238,150,75,0.10),transparent_30%)]" />
 
       <div className="confidex-container space-y-5 sm:space-y-6">
         <div className="confidex-card overflow-hidden bg-card">
           <div className="grid grid-cols-1 lg:grid-cols-[0.9fr_1.1fr]">
-            <div className="flex flex-col justify-between gap-6 border-b-2 border-border bg-black p-5 text-white sm:p-6 md:p-8 lg:border-b-0 lg:border-r-2 lg:p-10">
+            <div className="flex flex-col justify-between gap-6 border-b-2 border-border bg-card p-5 text-card-foreground sm:p-6 md:p-8 lg:border-b-0 lg:border-r-2 lg:p-10">
               <div className="space-y-5">
-                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white/75 sm:px-4 sm:tracking-[0.22em]">
+                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-border bg-background/80 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground shadow-sm sm:px-4 sm:tracking-[0.22em]">
                   <ShieldCheck className="size-4 shrink-0 text-primary" />
                   <span className="truncate">Contact Confidex</span>
                 </div>
@@ -155,7 +155,7 @@ export default function ContactPage() {
                     Need help or consultation guidance?
                   </h1>
 
-                  <p className="max-w-xl text-sm leading-7 text-white/70 sm:text-base sm:leading-8 md:text-lg">
+                  <p className="max-w-xl text-sm leading-7 text-muted-foreground sm:text-base sm:leading-8 md:text-lg">
                     Reach out for Confidex support, booth-related concerns, or
                     guidance on where users can seek further medical
                     consultation after using the screening service.
@@ -163,7 +163,7 @@ export default function ContactPage() {
                 </div>
               </div>
 
-              <div className="rounded-[24px] border border-white/15 bg-white/5 p-5">
+              <div className="rounded-[24px] border border-border bg-background p-5">
                 <div className="flex items-start gap-3">
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
                     <OctagonAlert className="size-5" />
@@ -174,7 +174,7 @@ export default function ContactPage() {
                       Important note
                     </p>
 
-                    <p className="mt-2 text-sm leading-7 text-white/70">
+                    <p className="mt-2 text-sm leading-7 text-muted-foreground">
                       Confidex is for screening support only. Users should
                       consult a qualified medical professional or accredited
                       facility for proper diagnosis, confirmation, counseling,
@@ -344,7 +344,7 @@ export default function ContactPage() {
                   type="submit"
                   size="lg"
                   disabled={isSubmitting}
-                  className="w-full rounded-2xl px-6 font-bold sm:w-auto cursor-pointer"
+                  className="w-full cursor-pointer rounded-2xl px-6 font-bold sm:w-auto"
                 >
                   {isSubmitting ? (
                     <>
@@ -414,41 +414,41 @@ export default function ContactPage() {
               </div>
             </div>
 
-            <div className="confidex-card overflow-hidden bg-primary text-primary-foreground">
+            <div className="confidex-card overflow-hidden bg-card text-card-foreground">
               <div className="p-5 sm:p-6 md:p-8">
                 <div className="flex items-start gap-4">
-                  <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary-foreground/15 text-primary-foreground">
+                  <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
                     <HeartHandshake className="size-6" />
                   </div>
 
                   <div className="min-w-0">
-                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary-foreground/70">
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">
                       Partnerships
                     </p>
 
-                    <h2 className="mt-2 text-2xl font-black leading-tight">
+                    <h2 className="mt-2 text-2xl font-black leading-tight text-foreground">
                       Work with Confidex
                     </h2>
                   </div>
                 </div>
 
-                <p className="mt-5 text-sm leading-7 text-primary-foreground/80">
+                <p className="mt-5 text-sm leading-7 text-muted-foreground">
                   For schools, clinics, facilities, or health organizations
                   interested in collaboration, deployment, consultation support,
                   or future validation, please send us a message through the
                   contact form.
                 </p>
 
-                <div className="mt-6 grid gap-3 text-sm text-primary-foreground/85">
-                  <div className="rounded-2xl border border-primary-foreground/15 bg-primary-foreground/10 p-4">
+                <div className="mt-6 grid gap-3 text-sm text-muted-foreground">
+                  <div className="rounded-2xl border border-border bg-background p-4">
                     Booth deployment inquiries
                   </div>
 
-                  <div className="rounded-2xl border border-primary-foreground/15 bg-primary-foreground/10 p-4">
+                  <div className="rounded-2xl border border-border bg-background p-4">
                     Clinic or facility coordination
                   </div>
 
-                  <div className="rounded-2xl border border-primary-foreground/15 bg-primary-foreground/10 p-4">
+                  <div className="rounded-2xl border border-border bg-background p-4">
                     Consultation and referral support
                   </div>
                 </div>

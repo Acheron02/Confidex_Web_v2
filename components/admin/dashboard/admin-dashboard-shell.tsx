@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldAlert } from "lucide-react";
 
@@ -21,9 +21,17 @@ import { UsersSection } from "@/components/admin/dashboard/users-section";
 import { useAdminDashboard } from "@/hooks/use-admin-dashboard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import type { AdminRole } from "@/lib/rbac";
 import { isAdminRole, isSuperAdminRole } from "@/lib/rbac";
 
 type DispenseSlot = "KIT1" | "KIT2" | "KIT3";
+
+type AdminDashboardUser = {
+  _id: string;
+  name?: string;
+  email?: string;
+  role: AdminRole;
+};
 
 function normalizeDispenseSlot(value: unknown): DispenseSlot {
   const slot = String(value || "")
@@ -39,6 +47,47 @@ function normalizeDispenseSlot(value: unknown): DispenseSlot {
 export function AdminDashboardShell() {
   const router = useRouter();
   const { user, loading, logout } = useAuth();
+
+  const adminUser =
+    user && isAdminRole(user.role) ? (user as AdminDashboardUser) : null;
+
+  useEffect(() => {
+    if (loading) return;
+
+    if (!user) {
+      router.replace("/");
+      return;
+    }
+
+    if (!isAdminRole(user.role)) {
+      router.replace(`/pages/users/${user._id}`);
+    }
+  }, [loading, router, user]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[calc(100dvh-10rem)] items-center justify-center px-4">
+        <p className="text-sm text-muted-foreground">
+          Checking admin access...
+        </p>
+      </div>
+    );
+  }
+
+  if (!adminUser) {
+    return null;
+  }
+
+  return <AdminDashboardContent user={adminUser} logout={logout} />;
+}
+
+function AdminDashboardContent({
+  user,
+  logout,
+}: {
+  user: AdminDashboardUser;
+  logout: () => Promise<void>;
+}) {
   const dashboard = useAdminDashboard();
 
   const refreshing =
@@ -49,7 +98,7 @@ export function AdminDashboardShell() {
     dashboard.loadingResultImages ||
     dashboard.loadingCouponRequests;
 
-  const canManageAdmins = isSuperAdminRole(user?.role);
+  const canManageAdmins = isSuperAdminRole(user.role);
 
   const refreshAll = () => {
     void dashboard.fetchAdmins();
@@ -274,7 +323,7 @@ export function AdminDashboardShell() {
             revenue={dashboard.revenue}
             totalUsers={dashboard.totalUsers}
             onSectionChange={dashboard.setSection}
-            role={user?.role}
+            role={user.role}
           />
         );
     }
@@ -284,28 +333,8 @@ export function AdminDashboardShell() {
     stockMonitoringBooths,
     coinInventoryBooths,
     boothProductsData,
-    user?.role,
+    user.role,
   ]);
-
-  if (loading) {
-    return (
-      <div className="flex min-h-[calc(100dvh-10rem)] items-center justify-center px-4">
-        <p className="text-sm text-muted-foreground">
-          Checking admin access...
-        </p>
-      </div>
-    );
-  }
-
-  if (!user) {
-    router.replace("/");
-    return null;
-  }
-
-  if (!isAdminRole(user.role)) {
-    router.replace(`/pages/users/${user._id}`);
-    return null;
-  }
 
   return (
     <SidebarProvider defaultOpen>

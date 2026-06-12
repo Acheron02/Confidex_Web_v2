@@ -1,11 +1,19 @@
-// app/api/auth/adminLogin/route.ts
 import { NextResponse } from "next/server";
 import bcrypt from "bcrypt";
+
 import dbConnect from "@/lib/dbConnect";
 import Admin from "@/models/admin";
 import AdminEmailOtp from "@/models/AdminEmailOtp";
 import { sendAdminOtpEmail } from "@/lib/email";
+import { generateAdminOtp, hashAdminOtp } from "@/lib/admin-email-otp";
 import { setPendingAdminOtpCookie, signPendingAdminOtp } from "@/lib/session";
+
+type AdminLoginDoc = {
+  _id: unknown;
+  email: string;
+  password: string;
+  name?: string;
+};
 
 export async function POST(req: Request) {
   try {
@@ -22,7 +30,10 @@ export async function POST(req: Request) {
 
     const normalizedEmail = String(email).toLowerCase().trim();
 
-    const admin = await Admin.findOne({ email: normalizedEmail });
+    const admin = (await Admin.findOne({ email: normalizedEmail })
+      .select("_id email password name")
+      .lean()
+      .exec()) as AdminLoginDoc | null;
 
     if (!admin) {
       return NextResponse.json(
@@ -31,8 +42,7 @@ export async function POST(req: Request) {
       );
     }
 
-    //bcrypt compare (now works because password is hashed)
-    const isMatch = await bcrypt.compare(password, admin.password);
+    const isMatch = await bcrypt.compare(String(password), admin.password);
 
     if (!isMatch) {
       return NextResponse.json(
@@ -41,23 +51,27 @@ export async function POST(req: Request) {
       );
     }
 
-    //Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpHash = await bcrypt.hash(otp, 10);
-
+    const otp = generateAdminOtp();
+    const otpHash = hashAdminOtp(otp);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     await AdminEmailOtp.findOneAndUpdate(
       { email: normalizedEmail, consumedAt: null },
       {
-        adminId: admin._id,
-        email: normalizedEmail,
-        otpHash,
-        expiresAt,
-        attempts: 0,
-        consumedAt: null,
+        $set: {
+          adminId: admin._id,
+          email: normalizedEmail,
+          otpHash,
+          expiresAt,
+          attempts: 0,
+          consumedAt: null,
+        },
       },
-      { upsert: true, new: true },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      },
     );
 
     await sendAdminOtpEmail({
@@ -67,7 +81,7 @@ export async function POST(req: Request) {
     });
 
     const pendingToken = signPendingAdminOtp({
-      adminId: admin._id.toString(),
+      adminId: String(admin._id),
       email: admin.email,
       purpose: "admin-login-otp",
     });

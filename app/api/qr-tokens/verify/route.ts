@@ -1,9 +1,9 @@
-// app/api/qr-tokens/verify/route.ts
 import dbConnect from "@/lib/dbConnect";
 import QrToken from "@/models/qrToken";
 import User from "@/models/User";
 import { NextResponse } from "next/server";
 import { broadcast } from "@/server/webSocket";
+import { verifyOfflineLoginToken } from "@/lib/offline-login-token";
 
 type UserType = {
   _id: string | { toString(): string };
@@ -14,9 +14,21 @@ type UserType = {
   createdAt: Date;
 };
 
+function serializeUser(user: UserType) {
+  return {
+    _id: user._id.toString(),
+    username: user.username,
+    gender: user.gender,
+    dob: user.dob,
+    phoneNumber: user.phoneNumber,
+    createdAt: user.createdAt,
+  };
+}
+
 export async function POST(req: Request) {
   try {
     await dbConnect();
+
     const body = await req.json();
 
     if (!body.qrCode) {
@@ -35,6 +47,24 @@ export async function POST(req: Request) {
       );
     }
 
+    let userIdFromSignedToken = "";
+
+    if (qrCode.startsWith("LOGIN-OFFLINE-v1.")) {
+      const signed = verifyOfflineLoginToken(qrCode);
+
+      if (!signed.ok || !signed.payload?.sub) {
+        return NextResponse.json(
+          {
+            error: "Invalid offline-capable QR code",
+            reason: signed.error,
+          },
+          { status: 401 },
+        );
+      }
+
+      userIdFromSignedToken = signed.payload.sub;
+    }
+
     const qrRecord = await QrToken.findOne({
       token: qrCode,
       type: "login",
@@ -45,6 +75,19 @@ export async function POST(req: Request) {
     if (!qrRecord) {
       return NextResponse.json(
         { error: "QR code expired, already used, or invalid" },
+        { status: 401 },
+      );
+    }
+
+    const recordUserId = qrRecord.userId?.toString();
+
+    if (
+      userIdFromSignedToken &&
+      recordUserId &&
+      userIdFromSignedToken !== recordUserId
+    ) {
+      return NextResponse.json(
+        { error: "QR code user mismatch" },
         { status: 401 },
       );
     }
@@ -69,19 +112,20 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         message: "QR scanned successfully",
-        user: {
-          _id: user._id.toString(),
-          username: user.username,
-          gender: user.gender,
-          dob: user.dob,
-          phoneNumber: user.phoneNumber,
-          createdAt: user.createdAt,
-        },
+        user: serializeUser(user),
+        offlineCapable: qrCode.startsWith("LOGIN-OFFLINE-v1."),
       },
       { status: 200 },
     );
-  } catch (err) {
+  } catch (err: any) {
     console.error("[QR VERIFY] error:", err);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+
+    return NextResponse.json(
+      {
+        error: "Server error",
+        details: err?.message || String(err),
+      },
+      { status: 500 },
+    );
   }
 }

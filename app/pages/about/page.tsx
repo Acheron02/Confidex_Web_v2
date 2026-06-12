@@ -84,7 +84,7 @@ const team = [
 export default function AboutPage() {
   return (
     <section className="relative min-h-[calc(100svh-var(--navbar-height)-var(--footer-height))] overflow-hidden bg-background pt-[calc(var(--navbar-height)+1.25rem)] pb-[calc(var(--footer-height)+1.25rem)] sm:pt-[calc(var(--navbar-height)+2rem)] sm:pb-[calc(var(--footer-height)+2rem)]">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(196,106,42,0.18),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(36,87,165,0.12),transparent_32%)]" />
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(196,106,42,0.16),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(36,87,165,0.10),transparent_32%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(244,211,94,0.10),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(238,150,75,0.10),transparent_32%)]" />
 
       <div className="confidex-container space-y-5 sm:space-y-6">
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.05fr_0.95fr] lg:items-stretch">
@@ -123,15 +123,15 @@ export default function AboutPage() {
             </div>
           </div>
 
-          <div className="confidex-card flex flex-col overflow-hidden bg-black text-white">
-            <div className="border-b-2 border-white/15 p-5 sm:p-6 md:p-8">
+          <div className="confidex-card flex flex-col overflow-hidden bg-card text-card-foreground">
+            <div className="border-b-2 border-border p-5 sm:p-6 md:p-8">
               <div className="flex items-center gap-3">
-                <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-white sm:size-12">
+                <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground sm:size-12">
                   <Target className="size-5 sm:size-6" />
                 </div>
 
                 <div className="min-w-0">
-                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-white/60 sm:tracking-[0.24em]">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground sm:tracking-[0.24em]">
                     Purpose and goal
                   </p>
                   <h2 className="text-xl font-black sm:text-2xl">
@@ -142,7 +142,7 @@ export default function AboutPage() {
             </div>
 
             <div className="flex flex-1 flex-col gap-4 p-5 sm:p-6 md:p-8">
-              <p className="text-sm leading-7 text-white/75 sm:text-base sm:leading-8">
+              <p className="text-sm leading-7 text-muted-foreground sm:text-base sm:leading-8">
                 Confidex does not replace professional diagnosis. Its purpose is
                 to make preliminary screening easier to access, easier to
                 follow, and easier to discuss with qualified medical
@@ -153,10 +153,12 @@ export default function AboutPage() {
                 {goals.map((goal) => (
                   <div
                     key={goal}
-                    className="flex gap-3 rounded-2xl border border-white/10 bg-white/5 p-4"
+                    className="flex gap-3 rounded-2xl border border-border bg-background p-4"
                   >
                     <BadgeCheck className="mt-0.5 size-5 shrink-0 text-primary" />
-                    <p className="text-sm leading-6 text-white/80">{goal}</p>
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      {goal}
+                    </p>
                   </div>
                 ))}
               </div>
@@ -236,7 +238,7 @@ export default function AboutPage() {
                     target="_blank"
                     rel="noreferrer"
                     aria-label={`${member.name} LinkedIn profile`}
-                    className="absolute bottom-4 right-4 flex size-10 items-center justify-center rounded-full border border-white/30 bg-white/95 text-black shadow-md transition hover:bg-primary hover:text-white sm:bottom-5 sm:right-5 sm:size-11"
+                    className="absolute bottom-4 right-4 flex size-10 items-center justify-center rounded-full border border-border bg-background/95 text-foreground shadow-md transition hover:bg-primary hover:text-primary-foreground sm:bottom-5 sm:right-5 sm:size-11"
                   >
                     <Linkedin className="size-5" />
                   </a>

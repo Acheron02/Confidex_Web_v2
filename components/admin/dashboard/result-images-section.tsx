@@ -288,17 +288,30 @@ function getFilenameFromDisposition(disposition: string | null) {
   return "confidex-result-images.zip";
 }
 
-async function downloadSelectedImages(ids: string[]) {
+async function downloadSelectedOriginalImages(ids: string[]) {
   const res = await fetch("/api/admins/result-images/bulk-download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ ids }),
+    body: JSON.stringify({
+      ids,
+
+      // Important:
+      // Force the backend bulk-download route to use the untouched original/raw
+      // capture URLs, not result_image / annotated_image.
+      imageType: "original",
+      image_type: "original",
+      preferImageType: "original",
+      preferOriginal: true,
+      includeAnnotated: false,
+    }),
   });
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data?.error || "Failed to download selected images");
+    throw new Error(
+      data?.error || "Failed to download selected original images",
+    );
   }
 
   const blob = await res.blob();
@@ -337,6 +350,25 @@ export function ResultImagesSection({
   const [copiedTransactionId, setCopiedTransactionId] = React.useState<
     string | null
   >(null);
+  const [failedImageIds, setFailedImageIds] = React.useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const canShowImage = React.useCallback(
+    (image: ResultImageRecord | null) =>
+      Boolean(
+        image?.result_image &&
+        image?._id &&
+        !failedImageIds.has(String(image._id)),
+      ),
+    [failedImageIds],
+  );
+
+  const markImageFailed = React.useCallback((id?: string) => {
+    const cleanId = String(id || "").trim();
+    if (!cleanId) return;
+    setFailedImageIds((current) => new Set(current).add(cleanId));
+  }, []);
 
   const selectedIdSet = React.useMemo(
     () => new Set(selectedIds),
@@ -451,13 +483,31 @@ export function ResultImagesSection({
   React.useEffect(() => {
     if (!previewImage) return;
 
-    setPreviewLoading(true);
-  }, [previewImage]);
+    const latest = images.find((image) => image._id === previewImage._id);
+    if (!latest) {
+      setPreviewImage(null);
+      return;
+    }
+
+    if (latest !== previewImage) {
+      setPreviewImage(latest);
+      return;
+    }
+
+    setPreviewLoading(canShowImage(latest));
+  }, [previewImage, images, canShowImage]);
 
   React.useEffect(() => {
     const existingIds = new Set(images.map((image) => image._id));
 
     setSelectedIds((current) => current.filter((id) => existingIds.has(id)));
+    setFailedImageIds((current) => {
+      const next = new Set<string>();
+      current.forEach((id) => {
+        if (existingIds.has(id)) next.add(id);
+      });
+      return next;
+    });
   }, [images]);
 
   React.useEffect(() => {
@@ -518,7 +568,9 @@ export function ResultImagesSection({
     if (!selectedIds.length || bulkBusy) return;
 
     if (selectedIds.length > MAX_BULK_DOWNLOAD) {
-      setBulkError(`Select up to ${MAX_BULK_DOWNLOAD} images per download.`);
+      setBulkError(
+        `Select up to ${MAX_BULK_DOWNLOAD} original images per download.`,
+      );
       return;
     }
 
@@ -526,12 +578,12 @@ export function ResultImagesSection({
       setBulkBusy("download");
       setBulkError(null);
 
-      await downloadSelectedImages(selectedIds);
+      await downloadSelectedOriginalImages(selectedIds);
     } catch (error) {
       setBulkError(
         error instanceof Error
           ? error.message
-          : "Failed to download selected images",
+          : "Failed to download selected original images",
       );
     } finally {
       setBulkBusy(null);
@@ -579,7 +631,8 @@ export function ResultImagesSection({
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Browse uploaded result images by test kit type. Filter by capture or
-            upload date, then select images to download or delete.
+            upload date, then select images to download original captures or
+            delete.
           </p>
         </div>
 
@@ -712,7 +765,7 @@ export function ResultImagesSection({
                   ) : (
                     <Download className="size-4" />
                   )}
-                  Download selected
+                  Download originals
                 </Button>
 
                 <Button
@@ -801,16 +854,21 @@ export function ResultImagesSection({
                           <div className="relative shrink-0">
                             <button
                               type="button"
-                              onClick={() => setPreviewImage(image)}
+                              onClick={() => {
+                                setPreviewLoading(canShowImage(image));
+                                setPreviewImage(image);
+                              }}
                               className="relative aspect-[4/3] w-full overflow-hidden bg-muted text-left"
                               aria-label={`Open ${image.kitType} image`}
                             >
-                              {image.result_image ? (
+                              {canShowImage(image) ? (
                                 <img
+                                  key={`${image._id}:${image.result_image}`}
                                   src={image.result_image}
                                   alt={`${image.kitType} result image`}
                                   className="h-full w-full object-cover transition group-hover:scale-105"
                                   loading="lazy"
+                                  onError={() => markImageFailed(image._id)}
                                 />
                               ) : (
                                 <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
@@ -976,16 +1034,22 @@ export function ResultImagesSection({
                 </div>
               ) : null}
 
-              {previewImage.result_image ? (
+              {canShowImage(previewImage) ? (
                 <img
+                  key={`${previewImage._id}:${previewImage.result_image}`}
                   src={previewImage.result_image}
                   alt={`${previewImage.kitType} result preview`}
                   className="max-h-[72vh] w-auto max-w-full rounded-xl object-contain shadow-2xl"
                   onLoad={() => setPreviewLoading(false)}
-                  onError={() => setPreviewLoading(false)}
+                  onError={() => {
+                    markImageFailed(previewImage._id);
+                    setPreviewLoading(false);
+                  }}
                 />
               ) : (
-                <div className="text-sm text-white/70">No image available</div>
+                <div className="text-sm text-white/70">
+                  No image uploaded yet
+                </div>
               )}
             </div>
           </div>

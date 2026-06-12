@@ -196,14 +196,17 @@ export async function POST(req: NextRequest) {
 
     const results = await Result.find({
       _id: { $in: ids },
-      result_image: { $exists: true, $ne: "" },
+      $or: [
+        { original_image: { $exists: true, $ne: "" } },
+        { raw_image: { $exists: true, $ne: "" } },
+      ],
     })
-      .select("_id productID transaction_id result_image")
+      .select("_id productID transaction_id original_image raw_image")
       .lean();
 
     if (results.length === 0) {
       return NextResponse.json(
-        { error: "No downloadable images found" },
+        { error: "No downloadable original images found" },
         { status: 404 },
       );
     }
@@ -213,7 +216,14 @@ export async function POST(req: NextRequest) {
     const entries: ZipEntryInput[] = [];
 
     for (const result of results as any[]) {
-      const rawImageUrl = String(result.result_image || "").trim();
+      // IMPORTANT:
+      // Bulk download must use the untouched original/raw capture only.
+      // Do not fall back to result_image / annotated_image here, because the
+      // admin gallery download action is intended for original review images.
+      const rawImageUrl = String(
+        result.original_image || result.raw_image || "",
+      ).trim();
+
       if (!rawImageUrl) continue;
 
       const imageUrl = rawImageUrl.startsWith("http")
@@ -233,10 +243,12 @@ export async function POST(req: NextRequest) {
         result.transaction_id,
         String(result._id),
       );
+
       const filename = makeUniqueFilename(
-        `confidex_${product}_${transaction}.${extension}`,
+        `confidex_original_${product}_${transaction}.${extension}`,
         usedFilenames,
       );
+
       const data = Buffer.from(await imageRes.arrayBuffer());
 
       entries.push({ filename, data });
@@ -244,13 +256,16 @@ export async function POST(req: NextRequest) {
 
     if (entries.length === 0) {
       return NextResponse.json(
-        { error: "Selected image files could not be downloaded from storage" },
+        {
+          error:
+            "Selected original image files could not be downloaded from storage",
+        },
         { status: 502 },
       );
     }
 
     const zip = createZip(entries);
-    const filename = `confidex_result_images_${new Date().toISOString().slice(0, 10)}.zip`;
+    const filename = `confidex_original_images_${new Date().toISOString().slice(0, 10)}.zip`;
 
     return new NextResponse(zip, {
       status: 200,
@@ -264,7 +279,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("[ADMIN RESULT IMAGES][BULK DOWNLOAD] error:", error);
     return NextResponse.json(
-      { error: "Failed to download selected images" },
+      { error: "Failed to download selected original images" },
       { status: 500 },
     );
   }
