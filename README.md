@@ -158,4 +158,5 @@ The system was also designed with unreliable network conditions in mind. When th
 
 ## Notes
 
-CONFIDEX is a capstone prototype intended to support anonymous preliminary health screening. Results produced by the system should be treated as screening outputs only and should still be followed by proper medical consultation, confirmatory testing, and professional guidance.
+CONFIDEX is a capstone prototype intended to support anonymous preliminary health screening. Results produced by the system should be treated as screening outputs only and should still be followed by proper medical consultation, confirmatory testing, and professional guidance. 
+During user registration, CONFIDEX collects only the basic details needed to create and identify an anonymous user record: **phone number**, **birthdate**, **age**, and **gender**. These details are used for **account access**, **verification**, demographic reference, and **linking transactions**, receipts, and **screening results** to the correct user account within the system.
